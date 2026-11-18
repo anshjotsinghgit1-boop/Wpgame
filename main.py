@@ -578,7 +578,7 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     if game.vote_message_id:
         try:
             await context.bot.edit_message_text(
-                voting_text(game) + "\\n\\n🔒 <b>VOTING CLOSED</b>",
+                voting_text(game) + "\n\n🔒 <b>VOTING CLOSED</b>",
                 chat_id=game.chat_id,
                 message_id=game.vote_message_id,
                 reply_markup=None,
