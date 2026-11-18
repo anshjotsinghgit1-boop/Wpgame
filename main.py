@@ -106,6 +106,10 @@ BOT_USERNAME = ""
 
 def build_word_pair_bank() -> int:
     """Build 10,000+ related, non-overlapping pairs from the WordNet noun hierarchy."""
+    with sqlite3.connect(DATABASE_PATH) as db:
+        existing = db.execute("SELECT COUNT(*) FROM word_pair_bank").fetchone()[0]
+    if existing >= 10000:
+        return existing
     try:
         try:
             wn.synsets("dog", pos=wn.NOUN)
