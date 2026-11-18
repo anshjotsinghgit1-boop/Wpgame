@@ -575,6 +575,17 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     if game.vote_task and game.vote_task is not asyncio.current_task():
         game.vote_task.cancel()
     game.vote_task = None
+    if game.vote_message_id:
+        try:
+            await context.bot.edit_message_text(
+                voting_text(game) + "\\n\\n🔒 <b>VOTING CLOSED</b>",
+                chat_id=game.chat_id,
+                message_id=game.vote_message_id,
+                reply_markup=None,
+                parse_mode=ParseMode.HTML,
+            )
+        except TelegramError:
+            pass
     counts: dict[int, int] = {}
     for target_id in game.votes.values():
         counts[target_id] = counts.get(target_id, 0) + 1
