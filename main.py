@@ -316,7 +316,7 @@ async def verify_channel_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.answer("I can't see you in @xyronschannel yet. Join it, then try again.", show_alert=True)
 
 async def begin_game(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
-    game.phase = "explaining"
+    game.phase = "starting"
     game.active = [p.user_id for p in game.players]
     game.spy_id = random.choice(game.active)
     game.civilian_word, game.spy_word = random.choice(WORD_PAIRS)
@@ -364,7 +364,7 @@ async def begin_game(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
         parse_mode=ParseMode.HTML,
     )
     await asyncio.sleep(GAME_START_COUNTDOWN)
-    if game.phase == "finished":
+    if game.phase != "starting":
         return
     await start_explanation_round(game, context)
 
