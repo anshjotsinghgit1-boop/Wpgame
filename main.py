@@ -43,7 +43,7 @@ WORD_PAIRS = [
     ("Rain", "Snow"), ("Camera", "Phone"), ("Pen", "Pencil"),
     ("Apple", "Mango"), ("Hospital", "Clinic"), ("River", "Lake"),
     ("Eagle", "Falcon"), ("Bus", "Tram"), ("Piano", "Keyboard"),
-    ("火山", "Mountain"), ("Crown", " tiara"), ("Sofa", "Armchair"),
+    ("Volcano", "Mountain"), ("Crown", "Tiara"), ("Sofa", "Armchair"),
 ]
 
 @dataclass
@@ -293,7 +293,6 @@ async def verify_channel_callback(update: Update, context: ContextTypes.DEFAULT_
     query = update.callback_query
     if not query or not query.from_user:
         return
-    await query.answer()
     if await check_membership(context.bot, query.from_user.id):
         try:
             await query.edit_message_text(
