@@ -294,6 +294,7 @@ async def verify_channel_callback(update: Update, context: ContextTypes.DEFAULT_
     if not query or not query.from_user:
         return
     if await check_membership(context.bot, query.from_user.id):
+        await query.answer("Membership verified!")
         try:
             await query.edit_message_text(
                 "✅ Membership verified! You're ready to join a game. "
@@ -645,8 +646,6 @@ def main() -> None:
     if not BOT_TOKEN:
         raise SystemExit("BOT_TOKEN is missing. Set it in your environment or .env file.")
     db_init()
-    app = Application.builder().token(BOT_TOKEN).build()
-
     async def post_init(application: Application) -> None:
         global BOT_USERNAME
         me = await application.bot.get_me()
@@ -655,7 +654,7 @@ def main() -> None:
             raise RuntimeError("The bot must have a Telegram username for Join Game deep links.")
         log.info("Bot started as @%s; required channel: %s", BOT_USERNAME, REQUIRED_CHANNEL)
 
-    app.post_init = post_init
+    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("spy", spy_command))
     app.add_handler(CommandHandler("cancelspy", cancel_command))
