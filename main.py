@@ -26,7 +26,9 @@ DATABASE_PATH = os.getenv("DATABASE_PATH", "spy_game.sqlite3")
 MIN_PLAYERS = 5
 LOBBY_SECONDS = 120
 EXPLANATION_SECONDS = 30
-GAME_START_COUNTDOWN = 5
+GAME_START_COUNTDOWN = 30
+VOTING_SECONDS = 30
+SPY_GUESS_SECONDS = 30
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -85,6 +87,8 @@ class Game:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     task: Optional[asyncio.Task] = None
     turn_task: Optional[asyncio.Task] = None
+    vote_task: Optional[asyncio.Task] = None
+    guess_task: Optional[asyncio.Task] = None
 
     def player(self, user_id: int) -> Optional[Player]:
         return next((p for p in self.players if p.user_id == user_id), None)
@@ -235,8 +239,9 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     game.phase = "finished"
     if game.task:
         game.task.cancel()
-    if game.turn_task:
-        game.turn_task.cancel()
+    for task in (game.turn_task, game.vote_task, game.guess_task):
+        if task:
+            task.cancel()
     await message.reply_text("🛑 The game has been cancelled.")
     cleanup_game(game)
 
@@ -385,7 +390,7 @@ async def prompt_current_player(game: Game, context: ContextTypes.DEFAULT_TYPE) 
     player = active[game.turn_index]
     await context.bot.send_message(
         game.chat_id,
-        f"🎙️ {player.mention} — your 30 seconds to explain start now.",
+        f"🎙️ {player.mention} — your 30-second explanation window starts now. Send as many messages as you like.",
         parse_mode=ParseMode.HTML,
     )
     if game.turn_task:
@@ -442,59 +447,68 @@ async def group_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 pass
             return
         current = active[game.turn_index]
-        if user.id != current.user_id or user.id in game.explanations:
+        if user.id != current.user_id:
             try:
                 await message.delete()
             except TelegramError:
                 pass
             return
-        if not message.text:
-            try:
-                await message.delete()
-            except TelegramError:
-                pass
-            return
-        game.explanations[user.id] = message.text
-        if game.turn_task:
-            game.turn_task.cancel()
-            game.turn_task = None
-        game.turn_index += 1
-        await prompt_current_player(game, context)
+        # Current player may send unlimited messages during the full 30-second window.
 
 def voting_text(game: Game) -> str:
     players = {p.user_id: p for p in game.players}
+    palette = ["🔴", "🔵", "🟢", "🟡", "🟣", "🟠", "🟤", "⚫"]
     lines = []
-    for voter in game.active_players():
+    for index, voter in enumerate(game.active_players()):
         target_id = game.votes.get(voter.user_id)
         if target_id:
             target = players.get(target_id)
-            lines.append(f"{html.escape(voter.name)} ➜ {html.escape(target.name if target else 'Unknown')}")
+            lines.append(f"{html.escape(voter.name)} {palette[index % len(palette)]} {html.escape(target.name if target else 'Unknown')}")
         else:
-            lines.append(f"{html.escape(voter.name)} ➜ <i>Not voted yet</i>")
+            lines.append(f"{html.escape(voter.name)} ⚪ <i>Not voted</i>")
     counts: dict[int, int] = {}
     for target_id in game.votes.values():
         counts[target_id] = counts.get(target_id, 0) + 1
     totals = "\n".join(
-        f"• {html.escape(players[uid].name)}: <b>{count}</b>"
+        f"• {html.escape(players[uid].name)} — <b>{count}</b>"
         for uid, count in sorted(counts.items(), key=lambda item: (-item[1], players[item[0]].name))
         if uid in players
     ) or "• No votes yet"
     return (
-        f"🗳️ <b>VOTE — ROUND {game.round_no}</b>\n\n"
-        "<b>Who voted for whom:</b>\n" + "\n".join(lines) +
-        "\n\n<b>Live totals:</b>\n" + totals +
-        f"\n\n✅ Votes: <b>{len(game.votes)}/{len(game.active)}</b>"
+        f"🗳️ <b>VOTING · ROUND {game.round_no}</b>\n\n"
+        + "\n".join(lines)
+        + f"\n\n<b>LIVE RESULTS</b>\n{totals}"
+        + f"\n\n🗳️ <b>{len(game.votes)}/{len(game.active)} voted</b>"
+        + f"\n⏳ <b>{VOTING_SECONDS}-second voting window</b>"
     )
+
 
 def voting_markup(game: Game) -> InlineKeyboardMarkup:
     candidates = game.vote_candidates or game.active
     players = {p.user_id: p for p in game.players}
+    palette = ["🔴", "🔵", "🟢", "🟡", "🟣", "🟠", "🟤", "⚫"]
     rows = []
-    for uid in candidates:
+    for index, uid in enumerate(candidates):
         player = players.get(uid)
         if player:
-            rows.append([InlineKeyboardButton(player.name[:60], callback_data=f"vote:{game.game_id}:{uid}")])
+            rows.append([InlineKeyboardButton(
+                f"{palette[index % len(palette)]} {player.name[:55]}",
+                callback_data=f"vote:{game.game_id}:{uid}"
+            )])
     return InlineKeyboardMarkup(rows)
+
+
+async def voting_timeout(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        await asyncio.sleep(VOTING_SECONDS)
+        async with game.lock:
+            if game.phase == "voting":
+                await finish_voting(game, context)
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        log.exception("Voting timer failed")
+
 
 async def open_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     game.phase = "voting"
@@ -507,6 +521,10 @@ async def open_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
         parse_mode=ParseMode.HTML,
     )
     game.vote_message_id = sent.message_id
+    if game.vote_task:
+        game.vote_task.cancel()
+    game.vote_task = asyncio.create_task(voting_timeout(game, context))
+
 
 async def vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -549,20 +567,21 @@ async def vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         except BadRequest as exc:
             if "Message is not modified" not in str(exc):
                 log.warning("Voting message edit failed: %s", exc)
-        if len(game.votes) == len(game.active):
-            await finish_voting(game, context)
 
 async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     if game.phase != "voting":
         return
     game.phase = "resolving"
+    if game.vote_task and game.vote_task is not asyncio.current_task():
+        game.vote_task.cancel()
+    game.vote_task = None
     counts: dict[int, int] = {}
     for target_id in game.votes.values():
         counts[target_id] = counts.get(target_id, 0) + 1
     if not counts:
-        game.phase = "finished"
-        await context.bot.send_message(game.chat_id, "No valid votes were cast. Game cancelled.")
-        cleanup_game(game)
+        await context.bot.send_message(game.chat_id, "⏳ Voting ended with no votes. Nobody is eliminated; the game continues.")
+        game.round_no += 1
+        await start_explanation_round(game, context)
         return
     highest = max(counts.values())
     tied = [uid for uid, count in counts.items() if count == highest]
@@ -577,6 +596,7 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
             parse_mode=ParseMode.HTML,
         )
         game.vote_message_id = sent.message_id
+        game.vote_task = asyncio.create_task(voting_timeout(game, context))
         return
     eliminated_id = tied[0]
     eliminated = game.player(eliminated_id)
@@ -617,7 +637,8 @@ async def ask_spy_guess(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     distractors = [pair[0] for pair in WORD_PAIRS if pair[0] != game.civilian_word]
     options.extend(random.sample(distractors, min(3, len(distractors))))
     random.shuffle(options)
-    rows = [[InlineKeyboardButton(word, callback_data=f"guess:{game.game_id}:{i}")]
+    guess_palette = ["🟣", "🔵", "🟢", "🟠"]
+    rows = [[InlineKeyboardButton(f"{guess_palette[i % len(guess_palette)]} {word}", callback_data=f"guess:{game.game_id}:{i}")]
             for i, word in enumerate(options)]
     try:
         await context.bot.send_message(
@@ -633,8 +654,21 @@ async def ask_spy_guess(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await context.bot.send_message(
         game.chat_id,
-        "🕵️ The Spy has been identified! They're getting one final chance to guess the civilians' word.",
+        f"🕵️ The Spy has been identified! They have {SPY_GUESS_SECONDS} seconds for one final guess.",
     )
+    game.guess_task = asyncio.create_task(spy_guess_timeout(game, context))
+
+
+async def spy_guess_timeout(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        await asyncio.sleep(SPY_GUESS_SECONDS)
+        if game.phase == "spy_guess":
+            await end_game(game, context, spy_wins=False, reason="The Spy ran out of time without making a guess.")
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        log.exception("Spy guess timer failed")
+
 
 async def guess_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -655,6 +689,9 @@ async def guess_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.answer("Invalid guess.", show_alert=True)
         return
     chosen = options[index]
+    if game.guess_task:
+        game.guess_task.cancel()
+        game.guess_task = None
     await query.answer("Guess locked!")
     try:
         await query.edit_message_text(f"Your guess: <b>{html.escape(chosen)}</b>", parse_mode=ParseMode.HTML)
@@ -669,9 +706,11 @@ async def guess_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def end_game(game: Game, context: ContextTypes.DEFAULT_TYPE, spy_wins: bool, reason: str) -> None:
     game.phase = "finished"
-    if game.turn_task:
-        game.turn_task.cancel()
-        game.turn_task = None
+    for task_name in ("turn_task", "vote_task", "guess_task"):
+        task = getattr(game, task_name)
+        if task and task is not asyncio.current_task():
+            task.cancel()
+        setattr(game, task_name, None)
     spy = game.player(game.spy_id) if game.spy_id else None
     winner = "🕵️ <b>THE SPY WINS!</b>" if spy_wins else "🎉 <b>THE CIVILIANS WIN!</b>"
     await context.bot.send_message(
