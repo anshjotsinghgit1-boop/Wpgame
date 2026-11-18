@@ -4,12 +4,15 @@ import asyncio
 import html
 import logging
 import os
+import re
 import random
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
+import nltk
+from nltk.corpus import wordnet as wn
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, User
 from telegram.constants import ChatType, ParseMode
@@ -101,12 +104,105 @@ GAMES: dict[str, Game] = {}
 CHAT_GAMES: dict[int, str] = {}
 BOT_USERNAME = ""
 
+def build_word_pair_bank() -> int:
+    """Build 10,000+ related, non-overlapping pairs from the WordNet noun hierarchy."""
+    try:
+        try:
+            wn.synsets("dog", pos=wn.NOUN)
+        except LookupError:
+            if not nltk.download("wordnet", quiet=True):
+                raise RuntimeError("Could not download the WordNet word database.")
+
+        candidates: dict[tuple[str, str], int] = {}
+        for parent in wn.all_synsets(pos=wn.NOUN):
+            children = parent.hyponyms()
+            if len(children) < 2:
+                continue
+            child_words = []
+            for child in children:
+                lemmas = []
+                for lemma in child.lemmas():
+                    word = lemma.name().replace("_", " ").strip().lower()
+                    if not re.fullmatch(r"[a-z]+(?: [a-z]+)?", word):
+                        continue
+                    if len(word) < 3 or len(word) > 28:
+                        continue
+                    lemmas.append((lemma.count(), word))
+                if lemmas:
+                    # Prefer the most familiar form for each concept.
+                    child_words.append(max(lemmas, key=lambda item: (item[0], -len(item[1]))))
+            for i in range(len(child_words)):
+                for j in range(i + 1, len(child_words)):
+                    score_a, word_a = child_words[i]
+                    score_b, word_b = child_words[j]
+                    if word_a == word_b:
+                        continue
+                    pair = tuple(sorted((word_a, word_b)))
+                    candidates[pair] = max(candidates.get(pair, 0), score_a + score_b)
+
+        # Greedily select the strongest related pairs without reusing any word.
+        ordered = sorted(candidates.items(), key=lambda item: (-item[1], item[0]))
+        selected = []
+        used_words = set()
+        for (word_a, word_b), _score in ordered:
+            if word_a in used_words or word_b in used_words:
+                continue
+            selected.append((word_a.title(), word_b.title()))
+            used_words.add(word_a)
+            used_words.add(word_b)
+            if len(selected) >= 10000:
+                break
+
+        if len(selected) < 10000:
+            raise RuntimeError(
+                f"WordNet produced only {len(selected)} non-overlapping pairs; 10,000 are required."
+            )
+
+        with sqlite3.connect(DATABASE_PATH) as db:
+            db.executemany(
+                "INSERT OR IGNORE INTO word_pair_bank(word_a, word_b) VALUES(?, ?)",
+                selected,
+            )
+            count = db.execute("SELECT COUNT(*) FROM word_pair_bank").fetchone()[0]
+        return count
+    except Exception:
+        log.exception("Could not build the expanded WordNet word bank")
+        raise
+
+
+def next_word_pair() -> tuple[str, str]:
+    """Return a pair without reusing either word until the full bank is exhausted."""
+    with sqlite3.connect(DATABASE_PATH, timeout=30) as db:
+        row = db.execute(
+            "SELECT id, word_a, word_b FROM word_pair_bank "
+            "WHERE used = 0 ORDER BY RANDOM() LIMIT 1"
+        ).fetchone()
+        if row is None:
+            db.execute("UPDATE word_pair_bank SET used = 0")
+            row = db.execute(
+                "SELECT id, word_a, word_b FROM word_pair_bank "
+                "ORDER BY RANDOM() LIMIT 1"
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("The word-pair bank is empty.")
+        db.execute("UPDATE word_pair_bank SET used = 1 WHERE id = ?", (row[0],))
+        return row[1], row[2]
+
+
 def db_init() -> None:
     with sqlite3.connect(DATABASE_PATH) as db:
         db.execute("""CREATE TABLE IF NOT EXISTS players (
             user_id INTEGER PRIMARY KEY, name TEXT NOT NULL, username TEXT,
             joined_at TEXT DEFAULT CURRENT_TIMESTAMP
         )""")
+        db.execute("""CREATE TABLE IF NOT EXISTS word_pair_bank (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            word_a TEXT NOT NULL UNIQUE,
+            word_b TEXT NOT NULL UNIQUE,
+            used INTEGER NOT NULL DEFAULT 0
+        )""")
+    pair_count = build_word_pair_bank()
+    log.info("Loaded %s unique word pairs (%s unique words).", pair_count, pair_count * 2)
 
 def remember_user(user: User) -> None:
     with sqlite3.connect(DATABASE_PATH) as db:
@@ -406,7 +502,7 @@ async def begin_game(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     game.phase = "starting"
     game.active = [p.user_id for p in game.players]
     game.spy_id = random.choice(game.active)
-    game.civilian_word, game.spy_word = random.choice(WORD_PAIRS)
+    game.civilian_word, game.spy_word = next_word_pair()
     random.shuffle(game.active)
 
     failed = []
