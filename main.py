@@ -25,6 +25,8 @@ REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@xyronschannel").strip()
 DATABASE_PATH = os.getenv("DATABASE_PATH", "spy_game.sqlite3")
 MIN_PLAYERS = 5
 LOBBY_SECONDS = 120
+EXPLANATION_SECONDS = 30
+GAME_START_COUNTDOWN = 5
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -82,6 +84,7 @@ class Game:
     vote_candidates: Optional[list[int]] = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     task: Optional[asyncio.Task] = None
+    turn_task: Optional[asyncio.Task] = None
 
     def player(self, user_id: int) -> Optional[Player]:
         return next((p for p in self.players if p.user_id == user_id), None)
@@ -232,6 +235,8 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     game.phase = "finished"
     if game.task:
         game.task.cancel()
+    if game.turn_task:
+        game.turn_task.cancel()
     await message.reply_text("🛑 The game has been cancelled.")
     cleanup_game(game)
 
@@ -349,11 +354,13 @@ async def begin_game(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await context.bot.send_message(
         game.chat_id,
-        "🎮 <b>The game has started!</b>\n"
-        f"👥 {len(game.active)} players are in. Everyone, check your bot DM for your secret word.\n"
-        "🔒 Keep your word secret. Explanations begin now.",
+        f"🔐 Secret words have been sent to the DMs of {len(game.active)} players. "
+        f"Keep your word private. The game starts in {GAME_START_COUNTDOWN} seconds!",
         parse_mode=ParseMode.HTML,
     )
+    await asyncio.sleep(GAME_START_COUNTDOWN)
+    if game.phase == "finished":
+        return
     await start_explanation_round(game, context)
 
 async def start_explanation_round(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -364,9 +371,8 @@ async def start_explanation_round(game: Game, context: ContextTypes.DEFAULT_TYPE
     game.votes = {}
     await context.bot.send_message(
         game.chat_id,
-        f"🗣️ <b>Explanation round {game.round_no}</b>\n"
-        "Each player must describe their word without saying it. "
-        "Only the player whose turn it is should send a message.",
+        f"🗣️ <b>Round {game.round_no}</b> — each player has {EXPLANATION_SECONDS} seconds "
+        "to explain their word. Describe it however you like, but don't say the word.",
         parse_mode=ParseMode.HTML,
     )
     await prompt_current_player(game, context)
@@ -379,10 +385,35 @@ async def prompt_current_player(game: Game, context: ContextTypes.DEFAULT_TYPE) 
     player = active[game.turn_index]
     await context.bot.send_message(
         game.chat_id,
-        f"🎙️ {player.mention} — it's your turn to explain! "
-        "Send one short explanation in the group.",
+        f"🎙️ {player.mention} — your 30 seconds to explain start now.",
         parse_mode=ParseMode.HTML,
     )
+    if game.turn_task:
+        game.turn_task.cancel()
+    game.turn_task = asyncio.create_task(
+        explanation_timeout(game, context, game.round_no, game.turn_index)
+    )
+
+async def explanation_timeout(
+    game: Game,
+    context: ContextTypes.DEFAULT_TYPE,
+    round_no: int,
+    turn_index: int,
+) -> None:
+    try:
+        await asyncio.sleep(EXPLANATION_SECONDS)
+        async with game.lock:
+            if (game.phase != "explaining" or game.round_no != round_no
+                    or game.turn_index != turn_index):
+                return
+            active = game.active_players()
+            if game.turn_index < len(active):
+                game.turn_index += 1
+                await prompt_current_player(game, context)
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        log.exception("Explanation timer failed")
 
 async def group_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
@@ -394,28 +425,39 @@ async def group_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     game_id = CHAT_GAMES.get(chat.id)
     game = GAMES.get(game_id) if game_id else None
-    if not game or game.phase != "explaining":
+    if not game or game.phase == "lobby" or game.phase == "finished":
         return
     async with game.lock:
-        active = game.active_players()
-        if game.turn_index >= len(active):
-            return
-        current = active[game.turn_index]
-        if user.id != current.user_id:
+        if game.phase != "explaining":
             try:
                 await message.delete()
             except TelegramError:
-                log.warning("Could not delete out-of-turn message in %s", chat.id)
-            await context.bot.send_message(
-                chat.id,
-                f"⚠️ {Player.from_user(user).mention}, please let {current.mention} explain the word!",
-                parse_mode=ParseMode.HTML,
-            )
+                pass
             return
-        if user.id in game.explanations:
-            await message.reply_text("You've already explained this round. Please wait for the others.")
+        active = game.active_players()
+        if game.turn_index >= len(active):
+            try:
+                await message.delete()
+            except TelegramError:
+                pass
             return
-        game.explanations[user.id] = message.text or "[non-text message]"
+        current = active[game.turn_index]
+        if user.id != current.user_id or user.id in game.explanations:
+            try:
+                await message.delete()
+            except TelegramError:
+                pass
+            return
+        if not message.text:
+            try:
+                await message.delete()
+            except TelegramError:
+                pass
+            return
+        game.explanations[user.id] = message.text
+        if game.turn_task:
+            game.turn_task.cancel()
+            game.turn_task = None
         game.turn_index += 1
         await prompt_current_player(game, context)
 
@@ -627,6 +669,9 @@ async def guess_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def end_game(game: Game, context: ContextTypes.DEFAULT_TYPE, spy_wins: bool, reason: str) -> None:
     game.phase = "finished"
+    if game.turn_task:
+        game.turn_task.cancel()
+        game.turn_task = None
     spy = game.player(game.spy_id) if game.spy_id else None
     winner = "🕵️ <b>THE SPY WINS!</b>" if spy_wins else "🎉 <b>THE CIVILIANS WIN!</b>"
     await context.bot.send_message(
