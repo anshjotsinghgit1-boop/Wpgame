@@ -133,8 +133,8 @@ def channel_keyboard() -> InlineKeyboardMarkup:
     channel = REQUIRED_CHANNEL
     url = f"https://t.me/{channel.lstrip('@')}" if channel.startswith("@") else channel
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📢 Join Channel", url=url)],
-        [InlineKeyboardButton("✅ I've Joined — Verify", callback_data="verify_channel")],
+        [InlineKeyboardButton("📢 Join Channel", url=url, style="primary")],
+        [InlineKeyboardButton("✅ I've Joined — Verify", callback_data="verify_channel", style="success")],
     ])
 
 async def send_channel_gate(message) -> None:
@@ -148,7 +148,7 @@ async def send_channel_gate(message) -> None:
 
 def lobby_markup(game_id: str) -> InlineKeyboardMarkup:
     deep_link = f"https://t.me/{BOT_USERNAME}?start=join_{game_id}"
-    return InlineKeyboardMarkup([[InlineKeyboardButton("🎮 Join Game", url=deep_link)]])
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🎮 Join Game", url=deep_link, style="success")]])
 
 def lobby_text(game: Game, seconds_left: int = LOBBY_SECONDS) -> str:
     names = "\n".join(f"• {html.escape(p.name)}" for p in game.players) or "• Waiting for players..."
@@ -457,13 +457,12 @@ async def group_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 def voting_text(game: Game) -> str:
     players = {p.user_id: p for p in game.players}
-    palette = ["🔴", "🔵", "🟢", "🟡", "🟣", "🟠", "🟤", "⚫"]
     lines = []
     for index, voter in enumerate(game.active_players()):
         target_id = game.votes.get(voter.user_id)
         if target_id:
             target = players.get(target_id)
-            lines.append(f"{html.escape(voter.name)} {palette[index % len(palette)]} {html.escape(target.name if target else 'Unknown')}")
+            lines.append(f"{html.escape(voter.name)} 🔴 {html.escape(target.name if target else 'Unknown')}")
         else:
             lines.append(f"{html.escape(voter.name)} ⚪ <i>Not voted</i>")
     counts: dict[int, int] = {}
@@ -486,14 +485,15 @@ def voting_text(game: Game) -> str:
 def voting_markup(game: Game) -> InlineKeyboardMarkup:
     candidates = game.vote_candidates or game.active
     players = {p.user_id: p for p in game.players}
-    palette = ["🔴", "🔵", "🟢", "🟡", "🟣", "🟠", "🟤", "⚫"]
+    styles = ["danger", "primary", "success"]
     rows = []
     for index, uid in enumerate(candidates):
         player = players.get(uid)
         if player:
             rows.append([InlineKeyboardButton(
-                f"{palette[index % len(palette)]} {player.name[:55]}",
-                callback_data=f"vote:{game.game_id}:{uid}"
+                f"🔴 {player.name[:55]}",
+                callback_data=f"vote:{game.game_id}:{uid}",
+                style=styles[index % len(styles)]
             )])
     return InlineKeyboardMarkup(rows)
 
@@ -617,15 +617,16 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
         voter = players.get(voter_id)
         target = players.get(target_id)
         if voter and target:
-            result_lines.append(f"• {voter.mention} voted for {target.mention}")
+            result_lines.append(f"• {html.escape(voter.name)} 🔴 {html.escape(target.name)}")
     await context.bot.send_message(
         game.chat_id,
         "📊 <b>FINAL VOTE BREAKDOWN</b>\n" +
         ("\n".join(result_lines) or "No votes") +
         "\n\n" +
         "\n".join(f"• {html.escape(players[uid].name)}: <b>{count}</b> vote(s)" for uid, count in sorted(counts.items(), key=lambda x: -x[1])) +
-        f"\n\n🚪 {eliminated.mention if eliminated else 'A player'} has been eliminated!",
+        f"\n\n🚪 <b>{html.escape(eliminated.name if eliminated else 'A player')}</b> has been eliminated!",
         parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
     )
     if eliminated_id == game.spy_id:
         await ask_spy_guess(game, context)
@@ -648,8 +649,8 @@ async def ask_spy_guess(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     distractors = [pair[0] for pair in WORD_PAIRS if pair[0] != game.civilian_word]
     options.extend(random.sample(distractors, min(3, len(distractors))))
     random.shuffle(options)
-    guess_palette = ["🟣", "🔵", "🟢", "🟠"]
-    rows = [[InlineKeyboardButton(f"{guess_palette[i % len(guess_palette)]} {word}", callback_data=f"guess:{game.game_id}:{i}")]
+    guess_styles = ["primary", "success", "danger"]
+    rows = [[InlineKeyboardButton(f"{word}", callback_data=f"guess:{game.game_id}:{i}", style=guess_styles[i % len(guess_styles)])]
             for i, word in enumerate(options)]
     try:
         await context.bot.send_message(
