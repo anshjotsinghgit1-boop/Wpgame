@@ -245,6 +245,82 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await message.reply_text("🛑 The game has been cancelled.")
     cleanup_game(game)
 
+def main_menu_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📜 Game Rules", callback_data="menu:rules", style="primary")],
+        [InlineKeyboardButton("📢 Updates Channel", url=f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}", style="success")],
+    ])
+
+
+def rules_text() -> str:
+    return (
+        "📜 <b>WHO'S THE SPY? — GAME RULES</b>\n\n"
+        "<b>🎯 Objective</b>\n"
+        "• Civilians share one secret word.\n"
+        "• The Spy gets a related but different word.\n"
+        "• Civilians must identify the Spy; the Spy must blend in.\n\n"
+        "<b>🎮 How a game works</b>\n"
+        "1. Start a lobby with /spy in a group.\n"
+        "2. At least 5 players must join within 2 minutes.\n"
+        "3. Everyone receives their secret word in the bot's DM.\n"
+        "4. The game begins 30 seconds after the words are sent.\n"
+        "5. Each player gets 30 seconds to explain and may send multiple messages.\n"
+        "6. Everyone gets 30 seconds to vote. Missing votes count as no vote.\n\n"
+        "<b>🗳️ Voting</b>\n"
+        "• You cannot vote for yourself.\n"
+        "• The player with the most votes is eliminated.\n"
+        "• A tie starts another vote between the tied players.\n"
+        "• If the eliminated player is not the Spy, another round begins.\n\n"
+        "<b>🕵️ Final chance</b>\n"
+        "If the Spy is caught, they get 30 seconds to guess the civilians' word. "
+        "A correct guess wins the game for the Spy; otherwise, civilians win.\n\n"
+        "<b>⚠️ Important</b>\n"
+        "• Join the required channel and press /start in the bot's DM before playing.\n"
+        "• Keep your secret word private.\n"
+        "• Follow the active player's turn; unrelated group messages may be removed."
+    )
+
+
+async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    if query.data == "menu:rules":
+        await query.answer()
+        await query.edit_message_text(
+            rules_text(),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Back to Menu", callback_data="menu:home", style="primary")
+            ]]),
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+    elif query.data == "menu:home":
+        await query.answer()
+        await query.edit_message_text(
+            "🕵️ <b>WHO'S THE SPY?</b>\n\n"
+            "A social deduction game of secret words, explanations and votes.\n\n"
+            "Use /spy in a group to open a lobby. At least 5 players are needed.\n"
+            "Tap below to learn the rules.",
+            reply_markup=main_menu_markup(),
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+
+
+async def rules_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    if message:
+        await message.reply_text(
+            rules_text(),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Main Menu", callback_data="menu:home", style="primary")
+            ]]),
+            parse_mode=ParseMode.HTML,
+            disable_web_page_preview=True,
+        )
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     user = update.effective_user
@@ -261,22 +337,25 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         game_id = payload[5:]
         game = GAMES.get(game_id)
         if not game or game.phase != "lobby":
-            await message.reply_text("That game lobby has closed. Ask the group to start a new /spy game.")
+            await message.reply_text(
+                "⌛ <b>This lobby has closed.</b>\nAsk the group to start a fresh game with /spy.",
+                parse_mode=ParseMode.HTML,
+            )
             return
         async with game.lock:
             if game.phase != "lobby":
-                await message.reply_text("This lobby has already started.")
+                await message.reply_text("⌛ This lobby has already started.")
                 return
             if game.player(user.id):
-                await message.reply_text("✅ You're already in this game. Wait for it to start!")
+                await message.reply_text("✅ You're already in! Keep this chat open for your secret word.")
                 return
             if len(game.players) >= 30:
-                await message.reply_text("This lobby is full (30 players).")
+                await message.reply_text("🚫 This lobby is full (30 players).")
                 return
             game.players.append(Player.from_user(user))
             await message.reply_text(
-                f"✅ You're in! You've joined the game in <b>{html.escape(str(game.chat_id))}</b>. "
-                "Keep this chat open — your secret word will arrive here when the game starts.",
+                "🎉 <b>YOU'RE IN!</b>\n\n"
+                "Your place is confirmed. Keep this chat open — your secret word will arrive here when the game begins.",
                 parse_mode=ParseMode.HTML,
             )
             try:
@@ -293,10 +372,18 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     await message.reply_text(
-        "🕵️ Welcome to <b>Who's the Spy?</b>\n\n"
-        "Join a game from a group's <b>Join Game</b> button. "
-        f"You must be a member of {html.escape(REQUIRED_CHANNEL)}.",
+        "🕵️ <b>WHO'S THE SPY?</b>\n"
+        "<i>One word separates the Spy from everyone else.</i>\n\n"
+        "🎮 <b>Start playing</b>\n"
+        "Open a group where the bot is added and send /spy. "
+        "Players can join using the lobby button.\n\n"
+        "👥 Minimum players: <b>5</b>\n"
+        "⏳ Lobby duration: <b>2 minutes</b>\n"
+        "🔐 Secret words are delivered here in your private chat.\n\n"
+        "Choose <b>Game Rules</b> below before your first round.",
+        reply_markup=main_menu_markup(),
         parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
     )
 
 async def verify_channel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -752,6 +839,8 @@ def main() -> None:
 
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("rules", rules_command))
+    app.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu:"))
     app.add_handler(CommandHandler("spy", spy_command))
     app.add_handler(CommandHandler("cancelspy", cancel_command))
     app.add_handler(CallbackQueryHandler(verify_channel_callback, pattern=r"^verify_channel$"))
