@@ -364,8 +364,9 @@ def rules_text() -> str:
         "2. At least 5 players must join within 2 minutes.\n"
         "3. Everyone receives their secret word in the bot's DM.\n"
         "4. The game begins 30 seconds after the words are sent.\n"
-        "5. Each player gets 30 seconds to explain and may send multiple messages.\n"
-        "6. Everyone gets 30 seconds to vote. Missing votes count as no vote.\n\n"
+        "5. Each player gets a 30-second turn to give clues about their word.\n"
+        "6. During voting, everyone can discuss freely before choosing a player.\n"
+        "7. Everyone gets 30 seconds to vote. Missing votes count as no vote.\n\n"
         "<b>🗳️ Voting</b>\n"
         "• You cannot vote for yourself.\n"
         "• The player with the most votes is eliminated.\n"
@@ -377,7 +378,8 @@ def rules_text() -> str:
         "<b>⚠️ Important</b>\n"
         "• Join the required channel and press /start in the bot's DM before playing.\n"
         "• Keep your secret word private.\n"
-        "• Follow the active player's turn; unrelated group messages may be removed."
+        "• During explanation turns, only the active player's messages are accepted.\n"
+        "• Group discussion stays open during voting."
     )
 
 
@@ -563,8 +565,10 @@ async def start_explanation_round(game: Game, context: ContextTypes.DEFAULT_TYPE
     game.votes = {}
     await context.bot.send_message(
         game.chat_id,
-        f"🗣️ <b>Round {game.round_no}</b> — each player has {EXPLANATION_SECONDS} seconds "
-        "to explain their word. Describe it however you like, but don't say the word.",
+        f"🗣️ <b>ROUND {game.round_no} · CLUE TIME</b>\n\n"
+        f"Each player gets <b>{EXPLANATION_SECONDS} seconds</b> to give the group a clue.\n"
+        "Describe what your word is used for, where you might find it, or what it is associated with. "
+        "<b>Don't say the word itself.</b>",
         parse_mode=ParseMode.HTML,
     )
     await prompt_current_player(game, context)
@@ -577,7 +581,10 @@ async def prompt_current_player(game: Game, context: ContextTypes.DEFAULT_TYPE) 
     player = active[game.turn_index]
     await context.bot.send_message(
         game.chat_id,
-        f"🎙️ {player.mention} — your 30-second explanation window starts now. Send as many messages as you like.",
+        f"🎙️ <b>{player.mention}'s turn</b> · <b>{EXPLANATION_SECONDS}s</b>\n\n"
+        "Give everyone a subtle clue about your word. You can describe its use, setting, "
+        "or something closely associated with it — just don't say the word.\n"
+        "<i>You may send multiple messages until the timer ends.</i>",
         parse_mode=ParseMode.HTML,
     )
     if game.turn_task:
@@ -617,14 +624,11 @@ async def group_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     game_id = CHAT_GAMES.get(chat.id)
     game = GAMES.get(game_id) if game_id else None
-    if not game or game.phase == "lobby" or game.phase == "finished":
+    if not game or game.phase != "explaining":
+        # Do not inspect or delete chat messages outside explanation turns.
         return
     async with game.lock:
         if game.phase != "explaining":
-            try:
-                await message.delete()
-            except TelegramError:
-                pass
             return
         active = game.active_players()
         if game.turn_index >= len(active):
@@ -661,11 +665,12 @@ def voting_text(game: Game) -> str:
         if uid in players
     ) or "• No votes yet"
     return (
-        f"🗳️ <b>VOTING · ROUND {game.round_no}</b>\n\n"
+        f"🗳️ <b>VOTING · ROUND {game.round_no}</b>\n"
+        "<i>Discuss the clues with everyone, then choose who you think is the Spy.</i>\n\n"
         + "\n".join(lines)
-        + f"\n\n<b>LIVE RESULTS</b>\n{totals}"
-        + f"\n\n🗳️ <b>{len(game.votes)}/{len(game.active)} voted</b>"
-        + f"\n⏳ <b>{VOTING_SECONDS}-second voting window</b>"
+        + f"\n\n<b>LIVE TALLY</b>\n{totals}"
+        + f"\n\n🗳️ <b>{len(game.votes)}/{len(game.active)} votes submitted</b>"
+        + f"\n⏳ <b>{VOTING_SECONDS}s voting window</b>"
     )
 
 
