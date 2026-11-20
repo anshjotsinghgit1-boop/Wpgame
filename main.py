@@ -579,13 +579,13 @@ async def prompt_current_player(game: Game, context: ContextTypes.DEFAULT_TYPE) 
         await open_voting(game, context)
         return
     player = active[game.turn_index]
+    turn_label = f"@{player.username}" if player.username else player.name
     await context.bot.send_message(
         game.chat_id,
-        f"🎙️ <b>{player.mention}'s turn</b> · <b>{EXPLANATION_SECONDS}s</b>\n\n"
-        "Give everyone a subtle clue about your word. You can describe its use, setting, "
-        "or something closely associated with it — just don't say the word.\n"
-        "<i>You may send multiple messages until the timer ends.</i>",
+        f"🎙️ <b>It's {html.escape(turn_label)}'s turn.</b> "
+        "Please explain your word. Everyone else, please remain quiet.",
         parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
     )
     if game.turn_task:
         game.turn_task.cancel()
