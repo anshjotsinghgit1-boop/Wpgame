@@ -397,7 +397,6 @@ def rules_text() -> str:
         "• During explanation turns, only the active player's messages are accepted.\n"
         "• Group discussion stays open during voting."
     )
-
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
@@ -791,14 +790,14 @@ async def vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         voter_id = query.from_user.id
         if voter_id not in game.active:
             await query.answer("Only active players can vote.", show_alert=True)
-            return        if voter_id in game.votes:
+            return
+        if voter_id in game.votes:
             await query.answer("You've already voted.", show_alert=True)
             return
         if target_id not in (game.vote_candidates or []):
             await query.answer("That player isn't eligible in this vote.", show_alert=True)
             return
-        if voter_id == target_id:
-            await query.answer("You can't vote for yourself.", show_alert=True)
+        if voter_id == target_id:            await query.answer("You can't vote for yourself.", show_alert=True)
             return
         game.votes[voter_id] = target_id
         await query.answer("Vote recorded!")
