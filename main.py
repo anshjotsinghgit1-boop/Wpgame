@@ -105,7 +105,7 @@ def build_word_pair_bank() -> int:
     with sqlite3.connect(DATABASE_PATH) as db:
         db.execute("CREATE TABLE IF NOT EXISTS word_bank_meta (version INTEGER NOT NULL)")
         row = db.execute("SELECT version FROM word_bank_meta LIMIT 1").fetchone()
-        if row and row[0] == 1:
+        if row and row[0] == 2:
             return db.execute("SELECT COUNT(*) FROM word_pair_bank").fetchone()[0]
 
         # Replace the old WordNet table once, removing its per-column UNIQUE limits.
@@ -121,7 +121,7 @@ def build_word_pair_bank() -> int:
             sorted(pairs, key=lambda pair: (pair[0].casefold(), pair[1].casefold())),
         )
         db.execute("DELETE FROM word_bank_meta")
-        db.execute("INSERT INTO word_bank_meta(version) VALUES(1)")
+        db.execute("INSERT INTO word_bank_meta(version) VALUES(2)")
         count = db.execute("SELECT COUNT(*) FROM word_pair_bank").fetchone()[0]
     return count
 
@@ -179,76 +179,6 @@ class Game:
 GAMES: dict[str, Game] = {}
 CHAT_GAMES: dict[int, str] = {}
 BOT_USERNAME = ""
-
-def build_word_pair_bank() -> int:
-    """Build 10,000+ related, non-overlapping pairs from the WordNet noun hierarchy."""
-    with sqlite3.connect(DATABASE_PATH) as db:
-        existing = db.execute("SELECT COUNT(*) FROM word_pair_bank").fetchone()[0]
-    if existing >= 10000:
-        return existing
-    try:
-        try:
-            wn.synsets("dog", pos=wn.NOUN)
-        except LookupError:
-            if not nltk.download("wordnet", quiet=True):
-                raise RuntimeError("Could not download the WordNet word database.")
-
-        candidates: dict[tuple[str, str], int] = {}
-        for parent in wn.all_synsets(pos=wn.NOUN):
-            children = parent.hyponyms()
-            if len(children) < 2:
-                continue
-            child_words = []
-            for child in children:
-                lemmas = []
-                for lemma in child.lemmas():
-                    word = lemma.name().replace("_", " ").strip().lower()
-                    if not re.fullmatch(r"[a-z]+(?: [a-z]+)?", word):
-                        continue
-                    if len(word) < 3 or len(word) > 28:
-                        continue
-                    lemmas.append((lemma.count(), word))
-                if lemmas:
-                    # Prefer the most familiar form for each concept.
-                    child_words.append(max(lemmas, key=lambda item: (item[0], -len(item[1]))))
-            for i in range(len(child_words)):
-                for j in range(i + 1, len(child_words)):
-                    score_a, word_a = child_words[i]
-                    score_b, word_b = child_words[j]
-                    if word_a == word_b:
-                        continue
-                    pair = tuple(sorted((word_a, word_b)))
-                    candidates[pair] = max(candidates.get(pair, 0), score_a + score_b)
-
-        # Greedily select the strongest related pairs without reusing any word.
-        ordered = sorted(candidates.items(), key=lambda item: (-item[1], item[0]))
-        selected = []
-        used_words = set()
-        for (word_a, word_b), _score in ordered:
-            if word_a in used_words or word_b in used_words:
-                continue
-            selected.append((word_a.title(), word_b.title()))
-            used_words.add(word_a)
-            used_words.add(word_b)
-            if len(selected) >= 10000:
-                break
-
-        if len(selected) < 10000:
-            raise RuntimeError(
-                f"WordNet produced only {len(selected)} non-overlapping pairs; 10,000 are required."
-            )
-
-        with sqlite3.connect(DATABASE_PATH) as db:
-            db.executemany(
-                "INSERT OR IGNORE INTO word_pair_bank(word_a, word_b) VALUES(?, ?)",
-                selected,
-            )
-            count = db.execute("SELECT COUNT(*) FROM word_pair_bank").fetchone()[0]
-        return count
-    except Exception:
-        log.exception("Could not build the expanded WordNet word bank")
-        raise
-
 
 def next_word_pair() -> tuple[str, str]:
     """Return a pair without reusing either word until the full bank is exhausted."""
@@ -1009,8 +939,15 @@ async def ask_spy_guess(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
         await end_game(game, context, spy_wins=correct, reason=("The demo Spy guessed the civilians' word correctly!" if correct else "The demo Spy guessed the wrong word."))
         return
     options = [game.civilian_word]
-    # Offer plausible distractors; only the exact civilian word wins.
-    distractors = [pair[0] for pair in WORD_PAIRS if pair[0] != game.civilian_word]
+    # Use only words from the simple everyday bank for the Spy's final choices.
+    with sqlite3.connect(DATABASE_PATH) as db:
+        distractors = [
+            row[0] for row in db.execute(
+                "SELECT word_a FROM word_pair_bank WHERE word_a != ? "
+                "UNION SELECT word_b FROM word_pair_bank WHERE word_b != ?",
+                (game.civilian_word, game.civilian_word),
+            ).fetchall()
+        ]
     options.extend(random.sample(distractors, min(3, len(distractors))))
     random.shuffle(options)
     guess_styles = ["primary", "success", "danger"]
