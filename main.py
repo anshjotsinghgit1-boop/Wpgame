@@ -196,6 +196,8 @@ class Game:
     turn_task: Optional[asyncio.Task] = None
     vote_task: Optional[asyncio.Task] = None
     guess_task: Optional[asyncio.Task] = None
+    correct_spy_voters: set[int] = field(default_factory=set)
+    stats_recorded: bool = False
 
     def player(self, user_id: int) -> Optional[Player]:
         return next((p for p in self.players if p.user_id == user_id), None)
@@ -233,6 +235,19 @@ def db_init() -> None:
         db.execute("""CREATE TABLE IF NOT EXISTS players (
             user_id INTEGER PRIMARY KEY, name TEXT NOT NULL, username TEXT,
             joined_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )""")
+        db.execute("""CREATE TABLE IF NOT EXISTS spy_stats (
+            user_id INTEGER PRIMARY KEY, name TEXT NOT NULL, username TEXT,
+            matches INTEGER NOT NULL DEFAULT 0, wins INTEGER NOT NULL DEFAULT 0,
+            spy_games INTEGER NOT NULL DEFAULT 0, spy_wins INTEGER NOT NULL DEFAULT 0,
+            correct_votes INTEGER NOT NULL DEFAULT 0
+        )""")
+        db.execute("""CREATE TABLE IF NOT EXISTS spy_chat_stats (
+            chat_id INTEGER NOT NULL, user_id INTEGER NOT NULL, name TEXT NOT NULL, username TEXT,
+            matches INTEGER NOT NULL DEFAULT 0, wins INTEGER NOT NULL DEFAULT 0,
+            spy_games INTEGER NOT NULL DEFAULT 0, spy_wins INTEGER NOT NULL DEFAULT 0,
+            correct_votes INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY(chat_id, user_id)
         )""")
         db.execute("""CREATE TABLE IF NOT EXISTS word_pair_bank (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -918,6 +933,8 @@ async def vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await query.answer("You can't vote for yourself.", show_alert=True)
             return
         game.votes[voter_id] = target_id
+        if target_id == game.spy_id:
+            game.correct_spy_voters.add(voter_id)
         await query.answer("Vote recorded!")
         try:
             await context.bot.edit_message_text(
@@ -1123,7 +1140,84 @@ async def guess_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 else "The Spy guessed the wrong word."),
     )
 
+def record_game_stats(game: Game, spy_wins: bool) -> None:
+    if game.stats_recorded:
+        return
+    game.stats_recorded = True
+    with sqlite3.connect(DATABASE_PATH, timeout=30) as db:
+        for player in game.players:
+            is_spy = player.user_id == game.spy_id
+            won = spy_wins if is_spy else not spy_wins
+            correct = player.user_id in game.correct_spy_voters
+            values = (player.user_id, player.name, player.username, int(won), int(is_spy), int(is_spy and spy_wins), int(correct))
+            db.execute("""INSERT INTO spy_stats(user_id,name,username,matches,wins,spy_games,spy_wins,correct_votes)
+                VALUES(?,?,?,1,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET
+                name=excluded.name, username=excluded.username, matches=matches+1,
+                wins=wins+excluded.wins, spy_games=spy_games+excluded.spy_games,
+                spy_wins=spy_wins+excluded.spy_wins, correct_votes=correct_votes+excluded.correct_votes""", values)
+            db.execute("""INSERT INTO spy_chat_stats(chat_id,user_id,name,username,matches,wins,spy_games,spy_wins,correct_votes)
+                VALUES(?,?,?,?,1,?,?,?,?) ON CONFLICT(chat_id,user_id) DO UPDATE SET
+                name=excluded.name, username=excluded.username, matches=matches+1,
+                wins=wins+excluded.wins, spy_games=spy_games+excluded.spy_games,
+                spy_wins=spy_wins+excluded.spy_wins, correct_votes=correct_votes+excluded.correct_votes""",
+                (game.chat_id, *values))
+
+
+async def spystate_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    if not message or not message.reply_to_message or not message.reply_to_message.from_user:
+        if message:
+            await message.reply_text("Reply to a player's message with /spystate to view their stats.")
+        return
+    user = message.reply_to_message.from_user
+    with sqlite3.connect(DATABASE_PATH) as db:
+        row = db.execute("SELECT matches,wins,spy_games,spy_wins,correct_votes FROM spy_stats WHERE user_id=?", (user.id,)).fetchone()
+        spy_rank = db.execute("SELECT COUNT(*)+1 FROM spy_stats WHERE spy_wins > COALESCE((SELECT spy_wins FROM spy_stats WHERE user_id=?),0)", (user.id,)).fetchone()[0]
+        civ_rank = db.execute("SELECT COUNT(*)+1 FROM spy_stats WHERE correct_votes > COALESCE((SELECT correct_votes FROM spy_stats WHERE user_id=?),0)", (user.id,)).fetchone()[0]
+    if not row:
+        await message.reply_text(f"{SPY_EMOJI} <b>{html.escape(user.full_name)}</b>\n\nNo completed matches yet.", parse_mode=ParseMode.HTML)
+        return
+    matches, wins, spy_games, spy_wins, correct_votes = row
+    name = f"@{html.escape(user.username)}" if user.username else html.escape(user.full_name)
+    text = (f"╭━━━ {SPY_EMOJI} ━━━╮\n<b>SPY PROFILE</b>\n╰━━━━━━━━━━╯\n\n"
+            f"👤 <b>{name}</b>\n\n"
+            f"🎮 Matches played: <b>{matches}</b>\n🏆 Matches won: <b>{wins}</b>\n"
+            f"🕵️ Times as Spy: <b>{spy_games}</b>  ·  Spy wins: <b>{spy_wins}</b>\n"
+            f"🎯 Correct Spy votes: <b>{correct_votes}</b>\n\n"
+            f"🌍 <b>WORLD RANKS</b>\n🕵️ Spy rank: <b>#{spy_rank}</b> (by Spy wins)\n"
+            f"👥 Civilian rank: <b>#{civ_rank}</b> (by correct Spy votes)")
+    await message.reply_text(text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+
+
+async def spyrank_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message, chat = update.effective_message, update.effective_chat
+    if not message or not chat or chat.type == ChatType.PRIVATE:
+        if message:
+            await message.reply_text("Use /spyrank in a group to see this chat's leaderboard.")
+        return
+    with sqlite3.connect(DATABASE_PATH) as db:
+        rows = db.execute("""SELECT c.user_id,c.name,c.username,c.wins,c.spy_wins,c.correct_votes,
+            (SELECT COUNT(*)+1 FROM spy_stats g WHERE g.spy_wins > c.spy_wins),
+            (SELECT COUNT(*)+1 FROM spy_stats g WHERE g.correct_votes > c.correct_votes)
+            FROM spy_chat_stats c WHERE c.chat_id=? ORDER BY c.wins DESC,c.spy_wins DESC,c.correct_votes DESC,c.matches DESC LIMIT 20""", (chat.id,)).fetchall()
+    if not rows:
+        await message.reply_text(f"{CHART_EMOJI} <b>SPY RANKINGS</b>\n\nNo completed matches in this chat yet.", parse_mode=ParseMode.HTML)
+        return
+    medals = ["🥇", "🥈", "🥉"]
+    lines = []
+    for index, row in enumerate(rows, 1):
+        uid, name, username, wins, spy_wins, correct, srank, crank = row
+        label = f"@{html.escape(username)}" if username else html.escape(name)
+        medal = medals[index-1] if index <= 3 else f"<b>{index}.</b>"
+        lines.append(f"{medal} {label}  ·  <b>{wins}W</b>  |  🕵️ #{srank}  |  🎯 #{crank}")
+    text = (f"╭━━━ {CHART_EMOJI} ━━━╮\n<b>WHO'S THE SPY · RANKINGS</b>\n╰━━━━━━━━━━╯\n\n"
+            f"<i>This chat · Global rank shown beside each player</i>\n\n" + "\n".join(lines) +
+            "\n\n<b>W</b> = total wins  ·  🕵️ = world Spy rank (Spy wins)  ·  🎯 = world Civilian rank (correct Spy votes)")
+    await message.reply_text(text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+
+
 async def end_game(game: Game, context: ContextTypes.DEFAULT_TYPE, spy_wins: bool, reason: str) -> None:
+    record_game_stats(game, spy_wins)
     game.phase = "finished"
     for task_name in ("turn_task", "vote_task", "guess_task"):
         task = getattr(game, task_name)
@@ -1166,6 +1260,8 @@ def main() -> None:
     app.add_handler(CommandHandler("rules", rules_command))
     app.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu:"))
     app.add_handler(CommandHandler("spy", spy_command))
+    app.add_handler(CommandHandler("spystate", spystate_command))
+    app.add_handler(CommandHandler("spyrank", spyrank_command))
     app.add_handler(CommandHandler(["endspy", "cancelspy"], cancel_command))
     app.add_handler(CallbackQueryHandler(verify_channel_callback, pattern=r"^verify_channel$"))
     app.add_handler(CallbackQueryHandler(vote_callback, pattern=r"^vote:"))
