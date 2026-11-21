@@ -25,6 +25,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@xyronschannel").strip()
 DATABASE_PATH = os.getenv("DATABASE_PATH", "spy_game.sqlite3")
+BOT_OWNER_ID = int(os.getenv("BOT_OWNER_ID", "0") or 0)
 MIN_PLAYERS = 5
 LOBBY_SECONDS = 10  # Temporary solo-demo lobby; restore to 120 after testing.
 EXPLANATION_SECONDS = 30
@@ -42,6 +43,9 @@ PEOPLE_EMOJI = '<tg-emoji emoji-id="5262824294819317210">👥</tg-emoji>'
 TIMER_EMOJI = '<tg-emoji emoji-id="5222175229681343920">⏳</tg-emoji>'
 CANCEL_EMOJI = '<tg-emoji emoji-id="5226886710020820160">❌</tg-emoji>'
 RED_EMOJI = '<tg-emoji emoji-id="6084515769780013003">🔴</tg-emoji>'
+EMOJI_FALLBACKS = {"speaker": "📢", "tick": "✅", "game": "🎮", "people": "👥", "timer": "⏳", "cancel": "❌", "red": "🔴"}
+EMOJI_IDS = {"speaker": "5361597938353067179", "tick": "5780463361175066565", "game": "4972415571384599106", "people": "5262824294819317210", "timer": "5222175229681343920", "cancel": "5226886710020820160", "red": "6084515769780013003"}
+SETID_ORDER = ["speaker", "tick", "game", "people", "timer", "cancel", "red"]
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -212,6 +216,7 @@ def next_word_pair() -> tuple[str, str]:
 
 def db_init() -> None:
     with sqlite3.connect(DATABASE_PATH) as db:
+        db.execute("CREATE TABLE IF NOT EXISTS bot_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         db.execute("""CREATE TABLE IF NOT EXISTS players (
             user_id INTEGER PRIMARY KEY, name TEXT NOT NULL, username TEXT,
             joined_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -222,8 +227,92 @@ def db_init() -> None:
             word_b TEXT NOT NULL UNIQUE,
             used INTEGER NOT NULL DEFAULT 0
         )""")
+    load_emoji_settings()
     pair_count = build_word_pair_bank()
     log.info("Loaded %s unique word pairs (%s unique words).", pair_count, pair_count * 2)
+
+def load_emoji_settings() -> None:
+    global SPEAKER_EMOJI, TICK_EMOJI, GAME_EMOJI, PEOPLE_EMOJI, TIMER_EMOJI, CANCEL_EMOJI, RED_EMOJI
+    with sqlite3.connect(DATABASE_PATH) as db:
+        rows = dict(db.execute("SELECT key, value FROM bot_settings WHERE key LIKE 'emoji_%'"))
+    for key in SETID_ORDER:
+        emoji_id = rows.get(f"emoji_{key}", EMOJI_IDS[key])
+        globals()[f"{key.upper()}_EMOJI"] = f'<tg-emoji emoji-id="{html.escape(emoji_id)}">{EMOJI_FALLBACKS[key]}</tg-emoji>'
+        EMOJI_IDS[key] = emoji_id
+
+
+def save_emoji_id(key: str, emoji_id: str) -> None:
+    if key not in EMOJI_FALLBACKS or not emoji_id.isdigit():
+        raise ValueError("Invalid emoji key or ID.")
+    with sqlite3.connect(DATABASE_PATH) as db:
+        db.execute("INSERT INTO bot_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (f"emoji_{key}", emoji_id))
+    EMOJI_IDS[key] = emoji_id
+    globals()[f"{key.upper()}_EMOJI"] = f'<tg-emoji emoji-id="{html.escape(emoji_id)}">{EMOJI_FALLBACKS[key]}</tg-emoji>'
+
+
+async def setid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message, user = update.effective_message, update.effective_user
+    if not message or not user or message.chat.type != ChatType.PRIVATE:
+        if message:
+            await message.reply_text("Use /setid in the bot's private chat.")
+        return
+    if not BOT_OWNER_ID or user.id != BOT_OWNER_ID:
+        await message.reply_text("Owner only. Add BOT_OWNER_ID=your_telegram_numeric_id to the service environment.")
+        return
+    context.user_data["setid_index"] = 0
+    await message.reply_text("Send the custom emoji ID for SPEAKER. Send only the numeric ID. I'll ask for each remaining emoji one by one. Use /cancelsetid to stop.")
+
+
+async def cancel_setid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    context.user_data.pop("setid_index", None)
+    if update.effective_message:
+        await update.effective_message.reply_text("Emoji ID setup cancelled.")
+
+
+async def replace_emoji_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message, user = update.effective_message, update.effective_user
+    if not message or not user or message.chat.type != ChatType.PRIVATE:
+        if message:
+            await message.reply_text("Use /replace in the bot's private chat.")
+        return
+    if not BOT_OWNER_ID or user.id != BOT_OWNER_ID:
+        await message.reply_text("Owner only. Add BOT_OWNER_ID=your_telegram_numeric_id to the service environment.")
+        return
+    match = re.fullmatch(r"(\d+)\s+to\s+(\d+)", " ".join(context.args), re.I)
+    if not match:
+        await message.reply_text("Format: /replace OLD_ID to NEW_ID")
+        return
+    old_id, new_id = match.groups()
+    keys = [key for key, value in EMOJI_IDS.items() if value == old_id]
+    if not keys:
+        await message.reply_text("That ID is not currently assigned.")
+        return
+    for key in keys:
+        save_emoji_id(key, new_id)
+    await message.reply_text("Updated: " + ", ".join(keys))
+
+
+async def emoji_id_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message, user = update.effective_message, update.effective_user
+    if not message or not user or user.id != BOT_OWNER_ID or message.chat.type != ChatType.PRIVATE:
+        return
+    index = context.user_data.get("setid_index")
+    if index is None:
+        return
+    emoji_id = (message.text or "").strip()
+    if not emoji_id.isdigit():
+        await message.reply_text("Please send only the numeric custom emoji ID.")
+        return
+    key = SETID_ORDER[index]
+    save_emoji_id(key, emoji_id)
+    index += 1
+    if index == len(SETID_ORDER):
+        context.user_data.pop("setid_index", None)
+        await message.reply_text("All remaining custom emoji IDs are saved permanently.")
+        return
+    context.user_data["setid_index"] = index
+    await message.reply_text(f"Saved {key.upper()}. Now send the ID for {SETID_ORDER[index].upper()}.")
+
 
 def remember_user(user: User) -> None:
     with sqlite3.connect(DATABASE_PATH) as db:
@@ -302,6 +391,7 @@ async def start_lobby_timer(game: Game, context: ContextTypes.DEFAULT_TYPE) -> N
                     game.chat_id,
                     f"{CANCEL_EMOJI} Game cancelled — only {len(game.players)} player(s) joined. "
                     f"At least {MIN_PLAYERS} are required.",
+                    parse_mode=ParseMode.HTML,
                 )
                 cleanup_game(game)
                 return
@@ -539,7 +629,8 @@ async def verify_channel_callback(update: Update, context: ContextTypes.DEFAULT_
         try:
             await query.edit_message_text(
                 f"{TICK_EMOJI} Membership verified! You're ready to join a game. "
-                "Return to the group and tap its Join Game button."
+                "Return to the group and tap its Join Game button.",
+                parse_mode=ParseMode.HTML,
             )
         except TelegramError:
             pass
@@ -581,6 +672,7 @@ async def begin_game(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
                 game.chat_id,
                 f"{CANCEL_EMOJI} The Spy couldn't be reached in private chat, so this game has been cancelled. "
                 "Players must press /start in the bot's DM before joining.",
+                parse_mode=ParseMode.HTML,
             )
             cleanup_game(game)
             return
@@ -589,6 +681,7 @@ async def begin_game(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
             await context.bot.send_message(
                 game.chat_id,
                 f"{CANCEL_EMOJI} Not enough players could be reached in private chat. Game cancelled.",
+                parse_mode=ParseMode.HTML,
             )
             cleanup_game(game)
             return
@@ -936,6 +1029,7 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     await context.bot.send_message(
         game.chat_id,
         f"{CANCEL_EMOJI} That player was not the Spy. The game continues with another round!",
+        parse_mode=ParseMode.HTML,
     )
     game.round_no += 1
     await start_explanation_round(game, context)
@@ -1065,6 +1159,10 @@ def main() -> None:
 
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start_command))
+    app.add_handler(CommandHandler("setid", setid_command))
+    app.add_handler(CommandHandler("cancelsetid", cancel_setid_command))
+    app.add_handler(CommandHandler("replace", replace_emoji_command))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, emoji_id_input), group=1)
     app.add_handler(CommandHandler("rules", rules_command))
     app.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu:"))
     app.add_handler(CommandHandler("spy", spy_command))
