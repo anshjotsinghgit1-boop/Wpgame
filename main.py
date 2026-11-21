@@ -650,7 +650,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 return
             game.players.append(Player.from_user(user))
             await message.reply_text(
-                "{JOIN_EMOJI} <b>YOU'RE IN!</b>\n\n"
+                f"{JOIN_EMOJI} <b>YOU'RE IN!</b>\n\n"
                 "Your place is confirmed. Keep this chat open — your secret word will arrive here when the game begins.",
                 parse_mode=ParseMode.HTML,
             )
