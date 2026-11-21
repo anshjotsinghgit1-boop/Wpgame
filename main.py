@@ -33,8 +33,10 @@ GAME_START_COUNTDOWN = 30
 VOTING_SECONDS = 30
 SPY_GUESS_SECONDS = 30
 
-# Telegram Premium custom emoji used wherever the Spy symbol appears.
-# Telegram Premium custom emoji IDs
+# Every emoji used in bot messages is configurable with /setid.
+EMOJI_FALLBACKS = {"spy":"🕵️","speaker":"📢","tick":"✅","game":"🎮","people":"👥","timer":"⏳","cancel":"❌","red":"🔴","stop":"🛑","add":"➕","rules":"📜","discussion":"💬","objective":"🎯","vote":"🗳️","warning":"⚠️","join":"🎉","secret":"🔐","round":"🗣️","mic":"🎙️","scale":"⚖️","lock":"🔒","chart":"📊","door":"🚪","blocked":"🚫"}
+EMOJI_IDS = {"spy":"5818800823374713651","speaker":"5361597938353067179","tick":"5780463361175066565","game":"4972415571384599106","people":"5262824294819317210","timer":"5222175229681343920","cancel":"5226886710020820160","red":"6084515769780013003"}
+SETID_ORDER = ["spy","speaker","tick","game","people","timer","cancel","red","stop","add","rules","discussion","objective","vote","warning","join","secret","round","mic","scale","lock","chart","door","blocked"]
 SPY_EMOJI = '<tg-emoji emoji-id="5818800823374713651">🕵️</tg-emoji>'
 SPEAKER_EMOJI = '<tg-emoji emoji-id="5361597938353067179">📢</tg-emoji>'
 TICK_EMOJI = '<tg-emoji emoji-id="5780463361175066565">✅</tg-emoji>'
@@ -43,9 +45,22 @@ PEOPLE_EMOJI = '<tg-emoji emoji-id="5262824294819317210">👥</tg-emoji>'
 TIMER_EMOJI = '<tg-emoji emoji-id="5222175229681343920">⏳</tg-emoji>'
 CANCEL_EMOJI = '<tg-emoji emoji-id="5226886710020820160">❌</tg-emoji>'
 RED_EMOJI = '<tg-emoji emoji-id="6084515769780013003">🔴</tg-emoji>'
-EMOJI_FALLBACKS = {"speaker": "📢", "tick": "✅", "game": "🎮", "people": "👥", "timer": "⏳", "cancel": "❌", "red": "🔴"}
-EMOJI_IDS = {"speaker": "5361597938353067179", "tick": "5780463361175066565", "game": "4972415571384599106", "people": "5262824294819317210", "timer": "5222175229681343920", "cancel": "5226886710020820160", "red": "6084515769780013003"}
-SETID_ORDER = ["speaker", "tick", "game", "people", "timer", "cancel", "red"]
+STOP_EMOJI = '<tg-emoji emoji-id="0">🛑</tg-emoji>'
+ADD_EMOJI = '<tg-emoji emoji-id="0">➕</tg-emoji>'
+RULES_EMOJI = '<tg-emoji emoji-id="0">📜</tg-emoji>'
+DISCUSSION_EMOJI = '<tg-emoji emoji-id="0">💬</tg-emoji>'
+OBJECTIVE_EMOJI = '<tg-emoji emoji-id="0">🎯</tg-emoji>'
+VOTE_EMOJI = '<tg-emoji emoji-id="0">🗳️</tg-emoji>'
+WARNING_EMOJI = '<tg-emoji emoji-id="0">⚠️</tg-emoji>'
+JOIN_EMOJI = '<tg-emoji emoji-id="0">🎉</tg-emoji>'
+SECRET_EMOJI = '<tg-emoji emoji-id="0">🔐</tg-emoji>'
+ROUND_EMOJI = '<tg-emoji emoji-id="0">🗣️</tg-emoji>'
+MIC_EMOJI = '<tg-emoji emoji-id="0">🎙️</tg-emoji>'
+SCALE_EMOJI = '<tg-emoji emoji-id="0">⚖️</tg-emoji>'
+LOCK_EMOJI = '<tg-emoji emoji-id="0">🔒</tg-emoji>'
+CHART_EMOJI = '<tg-emoji emoji-id="0">📊</tg-emoji>'
+DOOR_EMOJI = '<tg-emoji emoji-id="0">🚪</tg-emoji>'
+BLOCKED_EMOJI = '<tg-emoji emoji-id="0">🚫</tg-emoji>'
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -232,13 +247,14 @@ def db_init() -> None:
     log.info("Loaded %s unique word pairs (%s unique words).", pair_count, pair_count * 2)
 
 def load_emoji_settings() -> None:
-    global SPEAKER_EMOJI, TICK_EMOJI, GAME_EMOJI, PEOPLE_EMOJI, TIMER_EMOJI, CANCEL_EMOJI, RED_EMOJI
+    global SPY_EMOJI, SPEAKER_EMOJI, TICK_EMOJI, GAME_EMOJI, PEOPLE_EMOJI, TIMER_EMOJI, CANCEL_EMOJI, RED_EMOJI, STOP_EMOJI, ADD_EMOJI, RULES_EMOJI, DISCUSSION_EMOJI, OBJECTIVE_EMOJI, VOTE_EMOJI, WARNING_EMOJI, JOIN_EMOJI, SECRET_EMOJI, ROUND_EMOJI, MIC_EMOJI, SCALE_EMOJI, LOCK_EMOJI, CHART_EMOJI, DOOR_EMOJI, BLOCKED_EMOJI
     with sqlite3.connect(DATABASE_PATH) as db:
         rows = dict(db.execute("SELECT key, value FROM bot_settings WHERE key LIKE 'emoji_%'"))
     for key in SETID_ORDER:
-        emoji_id = rows.get(f"emoji_{key}", EMOJI_IDS[key])
+        emoji_id = rows.get(f"emoji_{key}", EMOJI_IDS.get(key, "0"))
         globals()[f"{key.upper()}_EMOJI"] = f'<tg-emoji emoji-id="{html.escape(emoji_id)}">{EMOJI_FALLBACKS[key]}</tg-emoji>'
-        EMOJI_IDS[key] = emoji_id
+        if emoji_id != "0":
+            EMOJI_IDS[key] = emoji_id
 
 
 def save_emoji_id(key: str, emoji_id: str) -> None:
@@ -269,7 +285,7 @@ async def setid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     context.user_data["setid_index"] = 0
     context.user_data["setid_pending"] = {}
-    await message.reply_text("Send the SPEAKER custom emoji itself (not its ID). I'll read its ID automatically, then ask for the next emoji. Nothing is changed until all seven are received. Use /cancelsetid to stop.")
+    await message.reply_text("Send the first custom emoji itself (not its ID). I will guide you through every emoji used in bot messages. Nothing changes until all are received. Use /cancelsetid to stop.")
 
 
 async def cancel_setid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -329,7 +345,7 @@ async def emoji_id_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             save_emoji_id(emoji_key, emoji_id)
         context.user_data.pop("setid_index", None)
         context.user_data.pop("setid_pending", None)
-        await message.reply_text("All seven custom emoji IDs have been saved permanently in the database. They will survive bot restarts.")
+        await message.reply_text("All bot message emoji IDs have been saved permanently and will survive restarts.")
         return
 
     context.user_data["setid_index"] = index
@@ -480,7 +496,7 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     for task in (game.turn_task, game.vote_task, game.guess_task, game.npc_task):
         if task:
             task.cancel()
-    await message.reply_text("🛑 The game has been cancelled.")
+    await message.reply_text("{STOP_EMOJI} The game has been cancelled.")
     cleanup_game(game)
 
 def main_menu_markup() -> InlineKeyboardMarkup:
@@ -496,8 +512,8 @@ def main_menu_markup() -> InlineKeyboardMarkup:
 
 def rules_text() -> str:
     return (
-        "📜 <b>WHO'S THE SPY? — GAME RULES</b>\n\n"
-        "<b>🎯 Objective</b>\n"
+        "{RULES_EMOJI} <b>WHO'S THE SPY? — GAME RULES</b>\n\n"
+        "<b>{OBJECTIVE_EMOJI} Objective</b>\n"
         "• Civilians share one secret word.\n"
         "• The Spy gets a related but different word.\n"
         "• Civilians must identify the Spy; the Spy must blend in.\n\n"
@@ -509,7 +525,7 @@ def rules_text() -> str:
         "5. Each player gets a 30-second turn to give clues about their word.\n"
         "6. During voting, everyone can discuss freely before choosing a player.\n"
         "7. Everyone gets 30 seconds to vote. Missing votes count as no vote.\n\n"
-        "<b>🗳️ Voting</b>\n"
+        "<b>{VOTE_EMOJI} Voting</b>\n"
         "• You cannot vote for yourself.\n"
         "• The player with the most votes is eliminated.\n"
         "• A tie starts another vote between the tied players.\n"
@@ -517,7 +533,7 @@ def rules_text() -> str:
         f"<b>{SPY_EMOJI} Final chance</b>\n"
         "If the Spy is caught, they get 30 seconds to guess the civilians' word. "
         "A correct guess wins the game for the Spy; otherwise, civilians win.\n\n"
-        "<b>⚠️ Important</b>\n"
+        "<b>{WARNING_EMOJI} Important</b>\n"
         "• Join the required channel and press /start in the bot's DM before playing.\n"
         "• Keep your secret word private.\n"
         "• During explanation turns, only the active player's messages are accepted.\n"
@@ -605,11 +621,11 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 await message.reply_text(f"{TICK_EMOJI} You're already in! Keep this chat open for your secret word.", parse_mode=ParseMode.HTML)
                 return
             if len(game.players) >= 30:
-                await message.reply_text("🚫 This lobby is full (30 players).")
+                await message.reply_text("{BLOCKED_EMOJI} This lobby is full (30 players).")
                 return
             game.players.append(Player.from_user(user))
             await message.reply_text(
-                "🎉 <b>YOU'RE IN!</b>\n\n"
+                "{JOIN_EMOJI} <b>YOU'RE IN!</b>\n\n"
                 "Your place is confirmed. Keep this chat open — your secret word will arrive here when the game begins.",
                 parse_mode=ParseMode.HTML,
             )
@@ -677,7 +693,7 @@ async def begin_game(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
                 (
                     f"{SPY_EMOJI} <b>YOU ARE THE SPY!</b>\n\nYou are the only Spy. Blend in with the others.\n\nYour secret word is: <b>{html.escape(word)}</b>"
                     if player.user_id == game.spy_id else
-                    f"🔐 <b>YOUR SECRET WORD</b>\n\nYour word is: <b>{html.escape(word)}</b>"
+                    f"{SECRET_EMOJI} <b>YOUR SECRET WORD</b>\n\nYour word is: <b>{html.escape(word)}</b>"
                 ),
 
                 parse_mode=ParseMode.HTML,
@@ -734,7 +750,7 @@ async def prompt_current_player(game: Game, context: ContextTypes.DEFAULT_TYPE) 
     player = active[game.turn_index]
     if player.is_npc:
         if game.turn_index == 0:
-            heading = f"🗣️ <b>ROUND {game.round_no}</b>\n\n"
+            heading = f"{ROUND_EMOJI} <b>ROUND {game.round_no}</b>\n\n"
         else:
             heading = ""
         clues = [
@@ -744,15 +760,15 @@ async def prompt_current_player(game: Game, context: ContextTypes.DEFAULT_TYPE) 
             "It is associated with everyday life.",
             "Some people prefer it over its alternative.",
         ]
-        await context.bot.send_message(game.chat_id, heading + f"🎙️ <b>{html.escape(player.name)}'s turn</b>\n{html.escape(random.choice(clues))}", parse_mode=ParseMode.HTML)
+        await context.bot.send_message(game.chat_id, heading + f"{MIC_EMOJI} <b>{html.escape(player.name)}'s turn</b>\n{html.escape(random.choice(clues))}", parse_mode=ParseMode.HTML)
         game.turn_index += 1
         game.turn_task = asyncio.create_task(npc_next_turn(game, context))
         return
     turn_label = f"@{player.username}" if player.username else player.name
-    heading = f"🗣️ <b>ROUND {game.round_no}</b>\n\n" if game.turn_index == 0 else ""
+    heading = f"{ROUND_EMOJI} <b>ROUND {game.round_no}</b>\n\n" if game.turn_index == 0 else ""
     await context.bot.send_message(
         game.chat_id,
-        heading + f"🎙️ <b>{html.escape(turn_label)}, describe your word.</b>",
+        heading + f"{MIC_EMOJI} <b>{html.escape(turn_label)}, describe your word.</b>",
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
@@ -838,13 +854,13 @@ def voting_text(game: Game) -> str:
         if uid in players
     ) or "• No votes yet"
     heading = (
-        f"⚖️ <b>TIE-BREAKER · ROUND {game.round_no}</b>"
-        if game.vote_is_tiebreaker else f"🗳️ <b>VOTING · ROUND {game.round_no}</b>"
+        f"{SCALE_EMOJI} <b>TIE-BREAKER · ROUND {game.round_no}</b>"
+        if game.vote_is_tiebreaker else f"{VOTE_EMOJI} <b>VOTING · ROUND {game.round_no}</b>"
     )
     return (
         f"{heading}\n\n"
         f"{totals}\n\n"
-        f"🗳️ <b>{len(game.votes)}/{len(game.active)} votes</b> · "
+        f"{VOTE_EMOJI} <b>{len(game.votes)}/{len(game.active)} votes</b> · "
         f"{TIMER_EMOJI} <b>{VOTING_SECONDS}s</b>"
     )
 
@@ -858,7 +874,7 @@ def voting_markup(game: Game) -> InlineKeyboardMarkup:
         player = players.get(uid)
         if player:
             rows.append([InlineKeyboardButton(
-                f"🔴 {player.name[:55]}",
+                f"{RED_EMOJI} {player.name[:55]}",
                 callback_data=f"vote:{game.game_id}:{uid}",
                 style=styles[index % len(styles)]
             )])
@@ -982,7 +998,7 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     if game.vote_message_id:
         try:
             await context.bot.edit_message_text(
-                voting_text(game) + "\n\n🔒 <b>CLOSED</b>",
+                voting_text(game) + "\n\n{LOCK_EMOJI} <b>CLOSED</b>",
                 chat_id=game.chat_id,
                 message_id=game.vote_message_id,
                 reply_markup=None,
@@ -1033,11 +1049,11 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     ]
     await context.bot.send_message(
         game.chat_id,
-        "📊 <b>FINAL VOTE BREAKDOWN</b>\n" +
+        "{CHART_EMOJI} <b>FINAL VOTE BREAKDOWN</b>\n" +
         ("\n".join(result_lines) or "No votes") +
         "\n\n" +
         "\n".join(tally_lines) +
-        f"\n\n🚪 <b>{linked_name(eliminated) if eliminated else 'A player'}</b> has been eliminated!",
+        f"\n\n{DOOR_EMOJI} <b>{linked_name(eliminated) if eliminated else 'A player'}</b> has been eliminated!",
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
@@ -1061,7 +1077,7 @@ async def ask_spy_guess(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     spy_player = game.player(game.spy_id) if game.spy_id else None
     if spy_player and spy_player.is_npc:
         correct = random.random() < 0.35
-        await context.bot.send_message(game.chat_id, f"🎯 <b>{html.escape(spy_player.name)}</b> is making a final guess...", parse_mode=ParseMode.HTML)
+        await context.bot.send_message(game.chat_id, f"{OBJECTIVE_EMOJI} <b>{html.escape(spy_player.name)}</b> is making a final guess...", parse_mode=ParseMode.HTML)
         await asyncio.sleep(3)
         await end_game(game, context, spy_wins=correct, reason=("The demo Spy guessed the civilians' word correctly!" if correct else "The demo Spy guessed the wrong word."))
         return
@@ -1083,7 +1099,7 @@ async def ask_spy_guess(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         await context.bot.send_message(
             game.spy_id,
-            "🎯 <b>You were caught!</b>\n\nYou get one final chance to steal the win. "
+            "{OBJECTIVE_EMOJI} <b>You were caught!</b>\n\nYou get one final chance to steal the win. "
             "What was the civilians' word?",
             reply_markup=InlineKeyboardMarkup(rows),
             parse_mode=ParseMode.HTML,
@@ -1153,7 +1169,7 @@ async def end_game(game: Game, context: ContextTypes.DEFAULT_TYPE, spy_wins: boo
             task.cancel()
         setattr(game, task_name, None)
     spy = game.player(game.spy_id) if game.spy_id else None
-    winner = f"{SPY_EMOJI} <b>THE SPY WINS!</b>" if spy_wins else "🎉 <b>THE CIVILIANS WIN!</b>"
+    winner = f"{SPY_EMOJI} <b>THE SPY WINS!</b>" if spy_wins else "{JOIN_EMOJI} <b>THE CIVILIANS WIN!</b>"
     await context.bot.send_message(
         game.chat_id,
         f"{winner}\n\n{html.escape(reason)}\n\n"
