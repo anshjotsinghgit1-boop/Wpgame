@@ -103,9 +103,16 @@ def build_word_pair_bank() -> int:
                 left, right = sorted((words[i], words[j]), key=str.casefold)
                 pairs.add((left, right))
     with sqlite3.connect(DATABASE_PATH) as db:
-        db.execute("DELETE FROM word_pair_bank")
+        # Recreate without the old per-column UNIQUE limits from the WordNet bank.
+        db.execute("DROP TABLE IF EXISTS word_pair_bank")
+        db.execute("""CREATE TABLE word_pair_bank (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            word_a TEXT NOT NULL,
+            word_b TEXT NOT NULL,
+            used INTEGER NOT NULL DEFAULT 0
+        )""")
         db.executemany(
-            "INSERT OR IGNORE INTO word_pair_bank(word_a, word_b, used) VALUES(?, ?, 0)",
+            "INSERT INTO word_pair_bank(word_a, word_b, used) VALUES(?, ?, 0)",
             sorted(pairs, key=lambda pair: (pair[0].casefold(), pair[1].casefold())),
         )
         count = db.execute("SELECT COUNT(*) FROM word_pair_bank").fetchone()[0]
@@ -607,11 +614,9 @@ async def begin_game(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
             await context.bot.send_message(
                 player.user_id,
                 (
-                    "🕵️ <b>YOU'RE THE SPY</b>\n\n"
-                    f"Your word is: <b>{html.escape(word)}</b>"
+                    "🕵️ <b>YOU ARE THE SPY!</b>\n\nYou are the only Spy. Blend in with the others.\n\nYour secret word is: <b>{html.escape(word)}</b>"
                     if player.user_id == game.spy_id else
-                    "🔐 <b>YOUR WORD</b>\n\n"
-                    f"Your word is: <b>{html.escape(word)}</b>"
+                    "🔐 <b>YOUR SECRET WORD</b>\n\nYour word is: <b>{html.escape(word)}</b>"
                 ),
 
                 parse_mode=ParseMode.HTML,
