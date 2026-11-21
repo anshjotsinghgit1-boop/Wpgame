@@ -1051,7 +1051,7 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     ]
     await context.bot.send_message(
         game.chat_id,
-        "{CHART_EMOJI} <b>FINAL VOTE BREAKDOWN</b>\n" +
+        f"{CHART_EMOJI} <b>FINAL VOTE BREAKDOWN</b>\n" +
         ("\n".join(result_lines) or "No votes") +
         "\n\n" +
         "\n".join(tally_lines) +
