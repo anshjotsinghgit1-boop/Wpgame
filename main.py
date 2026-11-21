@@ -88,6 +88,7 @@ class Game:
     votes: dict[int, int] = field(default_factory=dict)
     vote_message_id: Optional[int] = None
     vote_candidates: Optional[list[int]] = None
+    vote_is_tiebreaker: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     task: Optional[asyncio.Task] = None
     turn_task: Optional[asyncio.Task] = None
@@ -397,7 +398,6 @@ def rules_text() -> str:
         "• Group discussion stays open during voting."
     )
 
-
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query:
@@ -703,14 +703,6 @@ async def group_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 def voting_text(game: Game) -> str:
     players = {p.user_id: p for p in game.players}
-    lines = []
-    for index, voter in enumerate(game.active_players()):
-        target_id = game.votes.get(voter.user_id)
-        if target_id:
-            target = players.get(target_id)
-            lines.append(f"{html.escape(voter.name)} 🔴 {html.escape(target.name if target else 'Unknown')}")
-        else:
-            lines.append(f"{html.escape(voter.name)} ⚪ <i>Not voted</i>")
     counts: dict[int, int] = {}
     for target_id in game.votes.values():
         counts[target_id] = counts.get(target_id, 0) + 1
@@ -719,13 +711,15 @@ def voting_text(game: Game) -> str:
         for uid, count in sorted(counts.items(), key=lambda item: (-item[1], players[item[0]].name))
         if uid in players
     ) or "• No votes yet"
+    heading = (
+        f"⚖️ <b>TIE-BREAKER · ROUND {game.round_no}</b>"
+        if game.vote_is_tiebreaker else f"🗳️ <b>VOTING · ROUND {game.round_no}</b>"
+    )
     return (
-        f"🗳️ <b>VOTING · ROUND {game.round_no}</b>\n"
-        "<i>Discuss the clues with everyone, then choose who you think is the Spy.</i>\n\n"
-        + "\n".join(lines)
-        + f"\n\n<b>LIVE TALLY</b>\n{totals}"
-        + f"\n\n🗳️ <b>{len(game.votes)}/{len(game.active)} votes submitted</b>"
-        + f"\n⏳ <b>{VOTING_SECONDS}s voting window</b>"
+        f"{heading}\n\n"
+        f"{totals}\n\n"
+        f"🗳️ <b>{len(game.votes)}/{len(game.active)} votes</b> · "
+        f"⏳ <b>{VOTING_SECONDS}s</b>"
     )
 
 
@@ -797,8 +791,7 @@ async def vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         voter_id = query.from_user.id
         if voter_id not in game.active:
             await query.answer("Only active players can vote.", show_alert=True)
-            return
-        if voter_id in game.votes:
+            return        if voter_id in game.votes:
             await query.answer("You've already voted.", show_alert=True)
             return
         if target_id not in (game.vote_candidates or []):
@@ -828,17 +821,6 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     if game.vote_task and game.vote_task is not asyncio.current_task():
         game.vote_task.cancel()
     game.vote_task = None
-    if game.vote_message_id:
-        try:
-            await context.bot.edit_message_text(
-                voting_text(game) + "\n\n🔒 <b>VOTING CLOSED</b>",
-                chat_id=game.chat_id,
-                message_id=game.vote_message_id,
-                reply_markup=None,
-                parse_mode=ParseMode.HTML,
-            )
-        except TelegramError:
-            pass
     counts: dict[int, int] = {}
     for target_id in game.votes.values():
         counts[target_id] = counts.get(target_id, 0) + 1
@@ -851,21 +833,36 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     tied = [uid for uid, count in counts.items() if count == highest]
     if len(tied) > 1:
         game.phase = "voting"
+        game.vote_is_tiebreaker = True
         game.vote_candidates = tied
         game.votes = {}
         for npc in [p for p in game.active_players() if p.is_npc]:
             choices = [uid for uid in tied if uid != npc.user_id]
             if choices:
                 game.votes[npc.user_id] = random.choice(choices)
-        sent = await context.bot.send_message(
-            game.chat_id,
-            "⚖️ <b>It's a tie!</b> Vote again between the tied players.\n\n" + voting_text(game),
-            reply_markup=voting_markup(game),
-            parse_mode=ParseMode.HTML,
-        )
-        game.vote_message_id = sent.message_id
+        try:
+            await context.bot.edit_message_text(
+                voting_text(game),
+                chat_id=game.chat_id,
+                message_id=game.vote_message_id,
+                reply_markup=voting_markup(game),
+                parse_mode=ParseMode.HTML,
+            )
+        except TelegramError:
+            log.exception("Could not update voting message for tie-breaker")
         game.vote_task = asyncio.create_task(voting_timeout(game, context))
         return
+    if game.vote_message_id:
+        try:
+            await context.bot.edit_message_text(
+                voting_text(game) + "\n\n🔒 <b>CLOSED</b>",
+                chat_id=game.chat_id,
+                message_id=game.vote_message_id,
+                reply_markup=None,
+                parse_mode=ParseMode.HTML,
+            )
+        except TelegramError:
+            pass
     eliminated_id = tied[0]
     eliminated = game.player(eliminated_id)
     players = {p.user_id: p for p in game.players}
