@@ -876,7 +876,7 @@ def voting_markup(game: Game) -> InlineKeyboardMarkup:
         player = players.get(uid)
         if player:
             rows.append([InlineKeyboardButton(
-                f"{RED_EMOJI} {player.name[:55]}",
+                f"🔴 {player.name[:55]}",
                 callback_data=f"vote:{game.game_id}:{uid}",
                 style=styles[index % len(styles)]
             )])
