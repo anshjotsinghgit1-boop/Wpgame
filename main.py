@@ -32,6 +32,9 @@ GAME_START_COUNTDOWN = 30
 VOTING_SECONDS = 30
 SPY_GUESS_SECONDS = 30
 
+# Telegram Premium custom emoji used wherever the Spy symbol appears.
+SPY_EMOJI = '<tg-emoji emoji-id="5818800823374713651">🕵️</tg-emoji>'
+
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     level=logging.INFO,
@@ -259,7 +262,7 @@ def lobby_markup(game_id: str) -> InlineKeyboardMarkup:
 def lobby_text(game: Game, seconds_left: int = LOBBY_SECONDS) -> str:
     names = "\n".join(f"• {html.escape(p.name)}" for p in game.players) or "• Waiting for players..."
     return (
-        "🕵️ <b>WHO'S THE SPY?</b>\n\n"
+        f"{SPY_EMOJI} <b>WHO'S THE SPY?</b>\n\n"
         "A new game lobby is open!\n"
         f"👥 <b>Players:</b> {len(game.players)}/{MIN_PLAYERS}+\n"
         f"⏳ <b>Time:</b> {seconds_left // 60}:{seconds_left % 60:02d}\n\n"
@@ -391,7 +394,7 @@ def rules_text() -> str:
         "• The player with the most votes is eliminated.\n"
         "• A tie starts another vote between the tied players.\n"
         "• If the eliminated player is not the Spy, another round begins.\n\n"
-        "<b>🕵️ Final chance</b>\n"
+        f"<b>{SPY_EMOJI} Final chance</b>\n"
         "If the Spy is caught, they get 30 seconds to guess the civilians' word. "
         "A correct guess wins the game for the Spy; otherwise, civilians win.\n\n"
         "<b>⚠️ Important</b>\n"
@@ -420,7 +423,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     elif query.data == "menu:home":
         await query.answer()
         await query.edit_message_text(
-            "╭━━━ 🕵️ ━━━╮\n"
+            f"╭━━━ {SPY_EMOJI} ━━━╮\n"
             "<b>WHO'S THE SPY?</b>\n"
             "╰━━━━━━━━━━╯\n\n"
             "Welcome, detective.\n\n"
@@ -504,7 +507,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     await message.reply_text(
-        "╭━━━ 🕵️ ━━━╮\n"
+        f"╭━━━ {SPY_EMOJI} ━━━╮\n"
         "<b>WHO'S THE SPY?</b>\n"
         "╰━━━━━━━━━━╯\n\n"
         "Welcome, detective.\n\n"
@@ -551,7 +554,7 @@ async def begin_game(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
             await context.bot.send_message(
                 player.user_id,
                 (
-                    f"🕵️ <b>YOU ARE THE SPY!</b>\n\nYou are the only Spy. Blend in with the others.\n\nYour secret word is: <b>{html.escape(word)}</b>"
+                    f"{SPY_EMOJI} <b>YOU ARE THE SPY!</b>\n\nYou are the only Spy. Blend in with the others.\n\nYour secret word is: <b>{html.escape(word)}</b>"
                     if player.user_id == game.spy_id else
                     f"🔐 <b>YOUR SECRET WORD</b>\n\nYour word is: <b>{html.escape(word)}</b>"
                 ),
@@ -967,7 +970,8 @@ async def ask_spy_guess(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await context.bot.send_message(
         game.chat_id,
-        f"🕵️ The Spy has been identified! They have {SPY_GUESS_SECONDS} seconds for one final guess.",
+        f"{SPY_EMOJI} The Spy has been identified! They have {SPY_GUESS_SECONDS} seconds for one final guess.",
+        parse_mode=ParseMode.HTML,
     )
     game.guess_task = asyncio.create_task(spy_guess_timeout(game, context))
 
@@ -1025,13 +1029,13 @@ async def end_game(game: Game, context: ContextTypes.DEFAULT_TYPE, spy_wins: boo
             task.cancel()
         setattr(game, task_name, None)
     spy = game.player(game.spy_id) if game.spy_id else None
-    winner = "🕵️ <b>THE SPY WINS!</b>" if spy_wins else "🎉 <b>THE CIVILIANS WIN!</b>"
+    winner = f"{SPY_EMOJI} <b>THE SPY WINS!</b>" if spy_wins else "🎉 <b>THE CIVILIANS WIN!</b>"
     await context.bot.send_message(
         game.chat_id,
         f"{winner}\n\n{html.escape(reason)}\n\n"
-        f"🕵️ Spy: {spy.mention if spy else 'Unknown'}\n"
+        f"{SPY_EMOJI} Spy: {spy.mention if spy else 'Unknown'}\n"
         f"👥 Civilians' word: <b>{html.escape(game.civilian_word or '')}</b>\n"
-        f"🕵️ Spy's word: <b>{html.escape(game.spy_word or '')}</b>",
+        f"{SPY_EMOJI} Spy's word: <b>{html.escape(game.spy_word or '')}</b>",
         parse_mode=ParseMode.HTML,
     )
     cleanup_game(game)
