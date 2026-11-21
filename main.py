@@ -27,7 +27,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@xyronschannel").strip()
 DATABASE_PATH = os.getenv("DATABASE_PATH", "spy_game.sqlite3")
 MIN_PLAYERS = 5
-LOBBY_SECONDS = 120
+LOBBY_SECONDS = 10  # Temporary solo-demo lobby; restore to 120 after testing.
 EXPLANATION_SECONDS = 30
 GAME_START_COUNTDOWN = 30
 VOTING_SECONDS = 30
@@ -265,19 +265,19 @@ def lobby_text(game: Game, seconds_left: int = LOBBY_SECONDS) -> str:
 
 async def start_lobby_timer(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        await asyncio.sleep(60)
+        await asyncio.sleep(5)
         if game.phase != "lobby":
             return
         try:
             await context.bot.send_message(
                 game.chat_id,
-                "⏳ <b>1 minute left! Please join the game.</b>",
+                "⏳ <b>5 seconds left! Demo game is starting.</b>",
                 reply_to_message_id=game.lobby_message_id,
                 parse_mode=ParseMode.HTML,
             )
         except TelegramError:
             log.exception("Could not send lobby reminder")
-        await asyncio.sleep(60)
+        await asyncio.sleep(5)
         async with game.lock:
             if game.phase != "lobby":
                 return
@@ -631,7 +631,7 @@ async def prompt_current_player(game: Game, context: ContextTypes.DEFAULT_TYPE) 
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
-    if game.turn_task:
+    if game.turn_task and game.turn_task is not asyncio.current_task():
         game.turn_task.cancel()
     game.turn_task = asyncio.create_task(
         explanation_timeout(game, context, game.round_no, game.turn_index)
