@@ -397,7 +397,7 @@ async def start_lobby_timer(game: Game, context: ContextTypes.DEFAULT_TYPE) -> N
         try:
             await context.bot.send_message(
                 game.chat_id,
-                "⏳ <b>5 seconds left! Demo game is starting.</b>",
+                f"{TIMER_EMOJI} <b>5 seconds left! Demo game is starting.</b>",
                 reply_to_message_id=game.lobby_message_id,
                 parse_mode=ParseMode.HTML,
             )
@@ -710,7 +710,7 @@ async def begin_game(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await context.bot.send_message(
         game.chat_id,
-        "Words have been sent to your DMs ⚡",
+        "Your secret words are ready. Check your private chats to see your assigned word.",
         parse_mode=ParseMode.HTML,
     )
     await asyncio.sleep(GAME_START_COUNTDOWN)
