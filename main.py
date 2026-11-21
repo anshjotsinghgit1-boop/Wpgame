@@ -621,9 +621,9 @@ async def begin_game(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
             await context.bot.send_message(
                 player.user_id,
                 (
-                    "🕵️ <b>YOU ARE THE SPY!</b>\n\nYou are the only Spy. Blend in with the others.\n\nYour secret word is: <b>{html.escape(word)}</b>"
+                    f"🕵️ <b>YOU ARE THE SPY!</b>\n\nYou are the only Spy. Blend in with the others.\n\nYour secret word is: <b>{html.escape(word)}</b>"
                     if player.user_id == game.spy_id else
-                    "🔐 <b>YOUR SECRET WORD</b>\n\nYour word is: <b>{html.escape(word)}</b>"
+                    f"🔐 <b>YOUR SECRET WORD</b>\n\nYour word is: <b>{html.escape(word)}</b>"
                 ),
 
                 parse_mode=ParseMode.HTML,
