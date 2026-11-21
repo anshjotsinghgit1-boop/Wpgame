@@ -868,20 +868,44 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     eliminated_id = tied[0]
     eliminated = game.player(eliminated_id)
-    result_lines = []
     players = {p.user_id: p for p in game.players}
+
+    def linked_name(player: Player, limit: int = 14) -> str:
+        # Demo players have no Telegram account; real players get clickable mentions.
+        label = player.name if len(player.name) <= limit else player.name[:limit - 1].rstrip() + "…"
+        escaped = html.escape(label)
+        if player.is_npc:
+            return escaped
+        if player.username:
+            href = f"https://t.me/{html.escape(player.username)}"
+        else:
+            href = f"tg://user?id={player.user_id}"
+        return f'<a href="{href}">{escaped}</a>'
+
+    def aligned_name(player: Player, width: int = 15) -> str:
+        label = player.name if len(player.name) <= width else player.name[:width - 1].rstrip() + "…"
+        # Figure spaces keep the vote marker aligned without relying on Markdown spacing.
+        padding = "\u2007" * max(1, width - len(label) + 1)
+        return linked_name(player, width) + padding
+
+    result_lines = []
     for voter_id, target_id in game.votes.items():
         voter = players.get(voter_id)
         target = players.get(target_id)
         if voter and target:
-            result_lines.append(f"• {html.escape(voter.name)} 🔴 {html.escape(target.name)}")
+            result_lines.append(f"• {aligned_name(voter)}🔴 {linked_name(target)}")
+    tally_lines = [
+        f"• {linked_name(players[uid])}: <b>{count}</b> vote(s)"
+        for uid, count in sorted(counts.items(), key=lambda x: -x[1])
+        if uid in players
+    ]
     await context.bot.send_message(
         game.chat_id,
         "📊 <b>FINAL VOTE BREAKDOWN</b>\n" +
         ("\n".join(result_lines) or "No votes") +
         "\n\n" +
-        "\n".join(f"• {html.escape(players[uid].name)}: <b>{count}</b> vote(s)" for uid, count in sorted(counts.items(), key=lambda x: -x[1])) +
-        f"\n\n🚪 <b>{html.escape(eliminated.name if eliminated else 'A player')}</b> has been eliminated!",
+        "\n".join(tally_lines) +
+        f"\n\n🚪 <b>{linked_name(eliminated) if eliminated else 'A player'}</b> has been eliminated!",
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
