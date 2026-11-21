@@ -33,7 +33,15 @@ VOTING_SECONDS = 30
 SPY_GUESS_SECONDS = 30
 
 # Telegram Premium custom emoji used wherever the Spy symbol appears.
+# Telegram Premium custom emoji IDs
 SPY_EMOJI = '<tg-emoji emoji-id="5818800823374713651">🕵️</tg-emoji>'
+SPEAKER_EMOJI = '<tg-emoji emoji-id="5361597938353067179">📢</tg-emoji>'
+TICK_EMOJI = '<tg-emoji emoji-id="5780463361175066565">✅</tg-emoji>'
+GAME_EMOJI = '<tg-emoji emoji-id="4972415571384599106">🎮</tg-emoji>'
+PEOPLE_EMOJI = '<tg-emoji emoji-id="5262824294819317210">👥</tg-emoji>'
+TIMER_EMOJI = '<tg-emoji emoji-id="5222175229681343920">⏳</tg-emoji>'
+CANCEL_EMOJI = '<tg-emoji emoji-id="5226886710020820160">❌</tg-emoji>'
+RED_EMOJI = '<tg-emoji emoji-id="6084515769780013003">🔴</tg-emoji>'
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -292,7 +300,7 @@ async def start_lobby_timer(game: Game, context: ContextTypes.DEFAULT_TYPE) -> N
                 game.phase = "finished"
                 await context.bot.send_message(
                     game.chat_id,
-                    f"❌ Game cancelled — only {len(game.players)} player(s) joined. "
+                    f"{CANCEL_EMOJI} Game cancelled — only {len(game.players)} player(s) joined. "
                     f"At least {MIN_PLAYERS} are required.",
                 )
                 cleanup_game(game)
@@ -381,7 +389,7 @@ def rules_text() -> str:
         "• Civilians share one secret word.\n"
         "• The Spy gets a related but different word.\n"
         "• Civilians must identify the Spy; the Spy must blend in.\n\n"
-        "<b>🎮 How a game works</b>\n"
+        f"{GAME_EMOJI} <b>How a game works</b>\n"
         "1. Start a lobby with /spy in a group.\n"
         "2. At least 5 players must join within 2 minutes.\n"
         "3. Everyone receives their secret word in the bot's DM.\n"
@@ -482,7 +490,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 await message.reply_text("⌛ This lobby has already started.")
                 return
             if game.player(user.id):
-                await message.reply_text("✅ You're already in! Keep this chat open for your secret word.")
+                await message.reply_text(f"{TICK_EMOJI} You're already in! Keep this chat open for your secret word.", parse_mode=ParseMode.HTML)
                 return
             if len(game.players) >= 30:
                 await message.reply_text("🚫 This lobby is full (30 players).")
@@ -530,7 +538,7 @@ async def verify_channel_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.answer("Membership verified!")
         try:
             await query.edit_message_text(
-                "✅ Membership verified! You're ready to join a game. "
+                f"{TICK_EMOJI} Membership verified! You're ready to join a game. "
                 "Return to the group and tap its Join Game button."
             )
         except TelegramError:
@@ -571,7 +579,7 @@ async def begin_game(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
             game.phase = "finished"
             await context.bot.send_message(
                 game.chat_id,
-                "❌ The Spy couldn't be reached in private chat, so this game has been cancelled. "
+                f"{CANCEL_EMOJI} The Spy couldn't be reached in private chat, so this game has been cancelled. "
                 "Players must press /start in the bot's DM before joining.",
             )
             cleanup_game(game)
@@ -580,7 +588,7 @@ async def begin_game(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
             game.phase = "finished"
             await context.bot.send_message(
                 game.chat_id,
-                "❌ Not enough players could be reached in private chat. Game cancelled.",
+                f"{CANCEL_EMOJI} Not enough players could be reached in private chat. Game cancelled.",
             )
             cleanup_game(game)
             return
@@ -722,7 +730,7 @@ def voting_text(game: Game) -> str:
         f"{heading}\n\n"
         f"{totals}\n\n"
         f"🗳️ <b>{len(game.votes)}/{len(game.active)} votes</b> · "
-        f"⏳ <b>{VOTING_SECONDS}s</b>"
+        f"{TIMER_EMOJI} <b>{VOTING_SECONDS}s</b>"
     )
 
 
@@ -829,7 +837,7 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     for target_id in game.votes.values():
         counts[target_id] = counts.get(target_id, 0) + 1
     if not counts:
-        await context.bot.send_message(game.chat_id, "⏳ Voting ended with no votes. Nobody is eliminated; the game continues.")
+        await context.bot.send_message(game.chat_id, f"{TIMER_EMOJI} Voting ended with no votes. Nobody is eliminated; the game continues.", parse_mode=ParseMode.HTML)
         game.round_no += 1
         await start_explanation_round(game, context)
         return
@@ -902,7 +910,7 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
         voter = players.get(voter_id)
         target = players.get(target_id)
         if voter and target:
-            result_lines.append(f"• {aligned_name(voter)}🔴 {linked_name(target)}")
+            result_lines.append(f"• {aligned_name(voter)}{RED_EMOJI} {linked_name(target)}")
     tally_lines = [
         f"• {linked_name(players[uid])}: <b>{count}</b> vote(s)"
         for uid, count in sorted(counts.items(), key=lambda x: -x[1])
@@ -927,7 +935,7 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     await context.bot.send_message(
         game.chat_id,
-        "❌ That player was not the Spy. The game continues with another round!",
+        f"{CANCEL_EMOJI} That player was not the Spy. The game continues with another round!",
     )
     game.round_no += 1
     await start_explanation_round(game, context)
@@ -1034,7 +1042,7 @@ async def end_game(game: Game, context: ContextTypes.DEFAULT_TYPE, spy_wins: boo
         game.chat_id,
         f"{winner}\n\n{html.escape(reason)}\n\n"
         f"{SPY_EMOJI} Spy: {spy.mention if spy else 'Unknown'}\n"
-        f"👥 Civilians' word: <b>{html.escape(game.civilian_word or '')}</b>\n"
+        f"{PEOPLE_EMOJI} Civilians' word: <b>{html.escape(game.civilian_word or '')}</b>\n"
         f"{SPY_EMOJI} Spy's word: <b>{html.escape(game.spy_word or '')}</b>",
         parse_mode=ParseMode.HTML,
     )
