@@ -287,7 +287,7 @@ async def setid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     context.user_data["setid_index"] = 0
     context.user_data["setid_pending"] = {}
-    await message.reply_text("Send the first custom emoji itself (not its ID). I will guide you through every emoji used in bot messages. Nothing changes until all are received. Use /cancelsetid to stop.")
+    await message.reply_text("Send the SPY custom emoji itself (not its ID). I will guide you through every emoji used in bot messages, one at a time. Nothing changes until all are received. Use /cancelsetid to stop.")
 
 
 async def cancel_setid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
