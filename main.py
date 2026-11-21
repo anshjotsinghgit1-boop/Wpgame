@@ -548,10 +548,14 @@ async def begin_game(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
         try:
             await context.bot.send_message(
                 player.user_id,
-                "🕵️ <b>Your secret role</b>\n\n"
-                f"Your word is: <b>{html.escape(word)}</b>\n\n"
-                "Do not show this message or reveal your word. "
-                "Explain it naturally when it's your turn.",
+                (
+                    "🕵️ <b>YOU'RE THE SPY</b>\n\n"
+                    f"Your word is: <b>{html.escape(word)}</b>"
+                    if player.user_id == game.spy_id else
+                    "🔐 <b>YOUR WORD</b>\n\n"
+                    f"Your word is: <b>{html.escape(word)}</b>"
+                ),
+
                 parse_mode=ParseMode.HTML,
             )
         except (Forbidden, TelegramError):
@@ -580,8 +584,7 @@ async def begin_game(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await context.bot.send_message(
         game.chat_id,
-        f"🔐 Secret words have been sent to the DMs of {sum(not p.is_npc for p in game.active_players())} real player(s). "
-        f"Four demo players have joined automatically. Keep your word private. The game starts in {GAME_START_COUNTDOWN} seconds!",
+        "Words have been sent to your DMs ⚡",
         parse_mode=ParseMode.HTML,
     )
     await asyncio.sleep(GAME_START_COUNTDOWN)
@@ -595,14 +598,6 @@ async def start_explanation_round(game: Game, context: ContextTypes.DEFAULT_TYPE
     game.turn_index = 0
     game.explanations = {}
     game.votes = {}
-    await context.bot.send_message(
-        game.chat_id,
-        f"🗣️ <b>ROUND {game.round_no} · CLUE TIME</b>\n\n"
-        f"Each player gets <b>{EXPLANATION_SECONDS} seconds</b> to give the group a clue.\n"
-        "Describe what your word is used for, where you might find it, or what it is associated with. "
-        "<b>Don't say the word itself.</b>",
-        parse_mode=ParseMode.HTML,
-    )
     await prompt_current_player(game, context)
 
 async def prompt_current_player(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -612,6 +607,10 @@ async def prompt_current_player(game: Game, context: ContextTypes.DEFAULT_TYPE) 
         return
     player = active[game.turn_index]
     if player.is_npc:
+        if game.turn_index == 0:
+            heading = f"🗣️ <b>ROUND {game.round_no}</b>\n\n"
+        else:
+            heading = ""
         clues = [
             "You might use it every morning.",
             "It is something many people know well.",
@@ -619,15 +618,15 @@ async def prompt_current_player(game: Game, context: ContextTypes.DEFAULT_TYPE) 
             "It is associated with everyday life.",
             "Some people prefer it over its alternative.",
         ]
-        await context.bot.send_message(game.chat_id, f"🎙️ <b>{html.escape(player.name)}'s turn</b>\n{html.escape(random.choice(clues))}", parse_mode=ParseMode.HTML)
+        await context.bot.send_message(game.chat_id, heading + f"🎙️ <b>{html.escape(player.name)}'s turn</b>\n{html.escape(random.choice(clues))}", parse_mode=ParseMode.HTML)
         game.turn_index += 1
         game.turn_task = asyncio.create_task(npc_next_turn(game, context))
         return
     turn_label = f"@{player.username}" if player.username else player.name
+    heading = f"🗣️ <b>ROUND {game.round_no}</b>\n\n" if game.turn_index == 0 else ""
     await context.bot.send_message(
         game.chat_id,
-        f"🎙️ <b>It's {html.escape(turn_label)}'s turn.</b> "
-        "Please explain your word. Everyone else, please remain quiet.",
+        heading + f"🎙️ <b>{html.escape(turn_label)}, describe your word.</b>",
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
     )
