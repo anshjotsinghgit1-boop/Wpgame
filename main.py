@@ -303,9 +303,13 @@ def cleanup_game(game: Game) -> None:
 async def spy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     chat = update.effective_chat
+    user = update.effective_user
     if not message or not chat or chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
         if message:
             await message.reply_text("Use /spy in a Telegram group.")
+        return
+    if not user or not await check_membership(context.bot, user.id):
+        await send_channel_gate(message)
         return
     current_id = CHAT_GAMES.get(chat.id)
     if current_id and current_id in GAMES:
@@ -387,6 +391,9 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     query = update.callback_query
     if not query:
         return
+    if not await check_membership(context.bot, query.from_user.id):
+        await query.answer("Please join @xyronschannel before using the bot.", show_alert=True)
+        return
     if query.data == "menu:rules":
         await query.answer()
         await query.edit_message_text(
@@ -414,12 +421,15 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
         )
-        )
 
 
 async def rules_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
-    if message:
+    user = update.effective_user
+    if message and user:
+        if not await check_membership(context.bot, user.id):
+            await send_channel_gate(message)
+            return
         await message.reply_text(
             rules_text(),
             reply_markup=InlineKeyboardMarkup([[
