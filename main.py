@@ -11,8 +11,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Optional
 
-import nltk
-from nltk.corpus import wordnet as wn
+import uuid
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, User
 from telegram.constants import ChatType, ParseMode
@@ -39,19 +38,79 @@ logging.basicConfig(
 )
 log = logging.getLogger("whos-the-spy")
 
-# Related pairs: civilians receive the first word, the Spy receives the second.
-WORD_PAIRS = [
-    ("Coffee", "Tea"), ("Beach", "Swimming Pool"), ("Doctor", "Nurse"),
-    ("Airplane", "Helicopter"), ("Pizza", "Burger"), ("Lion", "Tiger"),
-    ("Guitar", "Violin"), ("Winter", "Summer"), ("Library", "Bookshop"),
-    ("Moon", "Sun"), ("Train", "Metro"), ("Hotel", "Resort"),
-    ("Football", "Basketball"), ("Laptop", "Tablet"), ("Candle", "Torch"),
-    ("Desert", "Beach"), ("Shark", "Dolphin"), ("Castle", "Palace"),
-    ("Rain", "Snow"), ("Camera", "Phone"), ("Pen", "Pencil"),
-    ("Apple", "Mango"), ("Hospital", "Clinic"), ("River", "Lake"),
-    ("Eagle", "Falcon"), ("Bus", "Tram"), ("Piano", "Keyboard"),
-    ("Volcano", "Mountain"), ("Crown", "Tiara"), ("Sofa", "Armchair"),
+# Simple everyday English + Hindi/Hinglish word groups.
+# Every pair comes from the same familiar topic, so clues are easy to explain.
+WORD_GROUPS = [
+    ["chai", "coffee", "doodh", "lassi", "juice", "paani", "sharbat", "soda", "nimbu paani", "milkshake"],
+    ["roti", "naan", "paratha", "puri", "bread", "pizza", "burger", "sandwich", "pasta", "noodles"],
+    ["samosa", "kachori", "pakora", "kachcha", "kachumber", "momos", "fries", "chips", "popcorn", "biscuit"],
+    ["aloo", "pyaz", "tamatar", "gajar", "matar", "bhindi", "gobhi", "baingan", "mirchi", "adrak"],
+    ["mango", "apple", "banana", "orange", "grapes", "papaya", "guava", "watermelon", "coconut", "pineapple"],
+    ["jalebi", "gulab jamun", "rasgulla", "laddu", "barfi", "cake", "ice cream", "chocolate", "toffee", "cookie"],
+    ["dal", "chawal", "rajma", "chole", "biryani", "pulao", "khichdi", "kadhi", "paneer", "butter chicken"],
+    ["namak", "cheeni", "mirch", "haldi", "jeera", "dhaniya", "elaichi", "laung", "dalchini", "ajwain"],
+    ["school", "college", "classroom", "teacher", "student", "principal", "homework", "exam", "blackboard", "notebook"],
+    ["pencil", "pen", "eraser", "sharpener", "scale", "marker", "crayon", "book", "bag", "lunchbox"],
+    ["mobile", "phone", "charger", "earphones", "headphones", "speaker", "remote", "keyboard", "mouse", "laptop"],
+    ["instagram", "youtube", "whatsapp", "telegram", "facebook", "snapchat", "reel", "meme", "selfie", "status"],
+    ["cricket", "football", "hockey", "kabaddi", "badminton", "tennis", "basketball", "volleyball", "chess", "carrom"],
+    ["bat", "ball", "wicket", "stumps", "helmet", "gloves", " jersey", "whistle", "goal", "referee"],
+    ["shirt", "tshirt", "jeans", "pant", "shorts", "kurta", "saree", "dress", "skirt", "jacket"],
+    ["bra", "panty", "socks", "vest", "underwear", "pajama", "night suit", "towel", "dupatta", "cap"],
+    ["shoes", "slippers", "sandals", "boots", "heels", "sneakers", "socks", "shoelace", "belt", "wallet"],
+    ["soap", "shampoo", "conditioner", "toothpaste", "toothbrush", "comb", "mirror", "perfume", "deodorant", "face wash"],
+    ["bed", "pillow", "blanket", "mattress", "bedsheet", "sofa", "chair", "table", "stool", "cupboard"],
+    ["fan", "cooler", "AC", "heater", "fridge", "washing machine", "mixer", "microwave", "iron", "TV"],
+    ["ghar", "kamra", "rasoi", "bathroom", "balcony", "chhat", "darwaza", "khidki", "seedhi", "garden"],
+    ["mummy", "papa", "bhai", "behen", "dadi", "nani", "dada", "nana", "chacha", "mama"],
+    ["dog", "cat", "cow", "buffalo", "goat", "sheep", "horse", "donkey", "camel", "monkey"],
+    ["lion", "tiger", "elephant", "giraffe", "zebra", "bear", "fox", "wolf", "deer", "rabbit"],
+    ["crow", "pigeon", "parrot", "sparrow", "peacock", "hen", "duck", "eagle", "owl", "hen"],
+    ["ant", "bee", "butterfly", "mosquito", "fly", "spider", "cockroach", "lizard", "frog", "snake"],
+    ["sun", "moon", "star", "cloud", "rain", "snow", "wind", "thunder", "rainbow", "fog"],
+    ["summer", "winter", "monsoon", "spring", "morning", "afternoon", "evening", "night", "today", "tomorrow"],
+    ["car", "bus", "train", "metro", "bike", "scooter", "cycle", "truck", "auto", "tractor"],
+    ["airport", "railway station", "bus stop", "market", "mall", "park", "zoo", "cinema", "hospital", "hotel"],
+    ["Delhi", "Mumbai", "Chandigarh", "Ludhiana", "Amritsar", "Jaipur", "Agra", "Pune", "Goa", "Kolkata"],
+    ["doctor", "nurse", "teacher", "police", "driver", "chef", "farmer", "singer", "actor", "dancer"],
+    ["king", "queen", "prince", "princess", "joker", "policeman", "superhero", "villain", "ghost", "monster"],
+    ["wedding", "birthday", "party", " picnic", "holiday", "festival", "Diwali", "Holi", "Eid", "Christmas"],
+    ["phone call", "message", "voice note", "video call", "group chat", "missed call", "alarm", " ringtone", "password", "emoji"],
+    ["laugh", "cry", "smile", "sleep", "snore", "yawn", "dance", "sing", "shout", "whisper"],
+    ["pankha", "jhadu", "pocha", "balti", "mug", "plate", "glass", "spoon", "fork", "katori"],
+    ["chappal", "joota", "topi", "pagdi", "chashma", "ghadi", "chain", "ring", "bangle", "earring"],
+    ["pocket", "button", "zip", "collar", "sleeve", "hood", "lace", "purse", "bag", "suitcase"],
+    ["pizza", "dosa", "idli", "dhokla", "pav bhaji", "chole bhature", "poha", "upma", "paratha", "maggi"],
+    ["water", "fire", "earth", "air", "sand", "mud", "stone", "wood", "metal", "plastic"],
+    ["red", "blue", "green", "yellow", "pink", "purple", "black", "white", "orange", "brown"],
+    ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"],
+    ["money", "coin", "note", "wallet", "ATM", "bank", "UPI", "QR code", "salary", "pocket money"],
+    ["wedding card", "gift", "balloon", "candle", "cake topper", "confetti", "ribbon", "decoration", "flower", "bouquet"],
+    ["meme", "joke", "prank", "roast", "comedy", "funny video", "cartoon", "filter", "sticker", "GIF"],
+    ["traffic", "signal", "zebra crossing", "speed breaker", "helmet", "seat belt", "parking", "petrol", "diesel", "puncture"],
+    ["crush", "best friend", "classmate", "neighbour", "roommate", "teammate", "cousin", "guest", "stranger", "celebrity"],
+    ["soap opera", "movie", "web series", "song", "dance video", "news", "cartoon show", "game show", "music video", "short film"],
+    ["pani puri", "golgappa", "bhel puri", "sev puri", "dahi puri", "papdi chaat", "tikki", "chaat", "kulcha", "kulfi"],
 ]
+
+def build_word_pair_bank() -> int:
+    """Replace obscure dictionary pairs with thousands of familiar, easy-to-explain pairs."""
+    pairs = set()
+    for group in WORD_GROUPS:
+        words = list(dict.fromkeys(word.strip() for word in group if word.strip()))
+        for i in range(len(words)):
+            for j in range(i + 1, len(words)):
+                left, right = sorted((words[i], words[j]), key=str.casefold)
+                pairs.add((left, right))
+    with sqlite3.connect(DATABASE_PATH) as db:
+        db.execute("DELETE FROM word_pair_bank")
+        db.executemany(
+            "INSERT OR IGNORE INTO word_pair_bank(word_a, word_b, used) VALUES(?, ?, 0)",
+            sorted(pairs, key=lambda pair: (pair[0].casefold(), pair[1].casefold())),
+        )
+        count = db.execute("SELECT COUNT(*) FROM word_pair_bank").fetchone()[0]
+    return count
+
 
 @dataclass
 class Player:
