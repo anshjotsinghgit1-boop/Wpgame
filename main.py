@@ -36,7 +36,7 @@ SPY_GUESS_SECONDS = 30
 # Every emoji used in bot messages is configurable with /setid.
 EMOJI_FALLBACKS = {"spy":"🕵️","speaker":"📢","tick":"✅","game":"🎮","people":"👥","timer":"⏳","cancel":"❌","red":"🔴","stop":"🛑","add":"➕","rules":"📜","discussion":"💬","objective":"🎯","vote":"🗳️","warning":"⚠️","join":"🎉","secret":"🔐","round":"🗣️","mic":"🎙️","scale":"⚖️","lock":"🔒","chart":"📊","door":"🚪","blocked":"🚫"}
 EMOJI_IDS = {"spy":"5818800823374713651","speaker":"5361597938353067179","tick":"5780463361175066565","game":"4972415571384599106","people":"5262824294819317210","timer":"5222175229681343920","cancel":"5226886710020820160","red":"6084515769780013003"}
-SETID_ORDER = ["spy","speaker","tick","game","people","timer","cancel","red","stop","add","rules","discussion","objective","vote","warning","join","secret","round","mic","scale","lock","chart","door","blocked"]
+SETID_ORDER = ["spy","speaker","tick","game","people","timer","cancel","red","stop","rules","objective","vote","warning","join","secret","round","mic","scale","lock","chart","door","blocked"]
 SPY_EMOJI = '<tg-emoji emoji-id="5818800823374713651">🕵️</tg-emoji>'
 SPEAKER_EMOJI = '<tg-emoji emoji-id="5361597938353067179">📢</tg-emoji>'
 TICK_EMOJI = '<tg-emoji emoji-id="5780463361175066565">✅</tg-emoji>'
@@ -514,8 +514,8 @@ def main_menu_markup() -> InlineKeyboardMarkup:
 
 def rules_text() -> str:
     return (
-        "{RULES_EMOJI} <b>WHO'S THE SPY? — GAME RULES</b>\n\n"
-        "<b>{OBJECTIVE_EMOJI} Objective</b>\n"
+        f"{RULES_EMOJI} <b>WHO'S THE SPY? — GAME RULES</b>\n\n"
+        f"<b>{OBJECTIVE_EMOJI} Objective</b>\n"
         "• Civilians share one secret word.\n"
         "• The Spy gets a related but different word.\n"
         "• Civilians must identify the Spy; the Spy must blend in.\n\n"
@@ -527,7 +527,7 @@ def rules_text() -> str:
         "5. Each player gets a 30-second turn to give clues about their word.\n"
         "6. During voting, everyone can discuss freely before choosing a player.\n"
         "7. Everyone gets 30 seconds to vote. Missing votes count as no vote.\n\n"
-        "<b>{VOTE_EMOJI} Voting</b>\n"
+        f"<b>{VOTE_EMOJI} Voting</b>\n"
         "• You cannot vote for yourself.\n"
         "• The player with the most votes is eliminated.\n"
         "• A tie starts another vote between the tied players.\n"
@@ -535,7 +535,7 @@ def rules_text() -> str:
         f"<b>{SPY_EMOJI} Final chance</b>\n"
         "If the Spy is caught, they get 30 seconds to guess the civilians' word. "
         "A correct guess wins the game for the Spy; otherwise, civilians win.\n\n"
-        "<b>{WARNING_EMOJI} Important</b>\n"
+        f"<b>{WARNING_EMOJI} Important</b>\n"
         "• Join the required channel and press /start in the bot's DM before playing.\n"
         "• Keep your secret word private.\n"
         "• During explanation turns, only the active player's messages are accepted.\n"
