@@ -26,8 +26,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 REQUIRED_CHANNEL = os.getenv("REQUIRED_CHANNEL", "@xyronschannel").strip()
 DATABASE_PATH = os.getenv("DATABASE_PATH", "spy_game.sqlite3")
 BOT_OWNER_ID = int(os.getenv("BOT_OWNER_ID", "0") or 0)
-MIN_PLAYERS = 5
-LOBBY_SECONDS = 10  # Temporary solo-demo lobby; restore to 120 after testing.
+MIN_PLAYERS = 4
+LOBBY_SECONDS = 120
 EXPLANATION_SECONDS = 30
 GAME_START_COUNTDOWN = 30
 VOTING_SECONDS = 30
@@ -161,7 +161,6 @@ class Player:
     user_id: int
     name: str
     username: Optional[str] = None
-    is_npc: bool = False
 
     @classmethod
     def from_user(cls, user: User) -> "Player":
@@ -197,7 +196,6 @@ class Game:
     turn_task: Optional[asyncio.Task] = None
     vote_task: Optional[asyncio.Task] = None
     guess_task: Optional[asyncio.Task] = None
-    npc_task: Optional[asyncio.Task] = None
 
     def player(self, user_id: int) -> Optional[Player]:
         return next((p for p in self.players if p.user_id == user_id), None)
@@ -409,19 +407,19 @@ def lobby_text(game: Game, seconds_left: int = LOBBY_SECONDS) -> str:
 
 async def start_lobby_timer(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
-        await asyncio.sleep(5)
+        await asyncio.sleep(LOBBY_SECONDS - 30)
         if game.phase != "lobby":
             return
         try:
             await context.bot.send_message(
                 game.chat_id,
-                f"{TIMER_EMOJI} <b>5 seconds left! Demo game is starting.</b>",
+                f"{TIMER_EMOJI} <b>30 seconds left to join!</b>",
                 reply_to_message_id=game.lobby_message_id,
                 parse_mode=ParseMode.HTML,
             )
         except TelegramError:
             log.exception("Could not send lobby reminder")
-        await asyncio.sleep(5)
+        await asyncio.sleep(30)
         async with game.lock:
             if game.phase != "lobby":
                 return
@@ -430,7 +428,7 @@ async def start_lobby_timer(game: Game, context: ContextTypes.DEFAULT_TYPE) -> N
                 await context.bot.send_message(
                     game.chat_id,
                     f"{CANCEL_EMOJI} Game cancelled — only {len(game.players)} player(s) joined. "
-                    f"At least {MIN_PLAYERS} are required.",
+                    f"At least {MIN_PLAYERS} real players are required.",
                     parse_mode=ParseMode.HTML,
                 )
                 cleanup_game(game)
@@ -465,11 +463,7 @@ async def spy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     game_id = uuid.uuid4().hex[:10]
     game = Game(game_id=game_id, chat_id=chat.id, lobby_message_id=0)
-    # Temporary demo mode: the command sender plus four clearly-labelled NPCs.
     game.players.append(Player.from_user(user))
-    npc_names = random.sample(["Alex", "Jordan", "Riley", "Taylor", "Morgan", "Casey", "Jamie", "Avery"], 4)
-    for index, npc_name in enumerate(npc_names, start=1):
-        game.players.append(Player(user_id=-index, name=f"{npc_name} (Demo)", username=None, is_npc=True))
     GAMES[game_id] = game
     CHAT_GAMES[chat.id] = game_id
     sent = await message.reply_text(
@@ -480,25 +474,39 @@ async def spy_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
     game.lobby_message_id = sent.message_id
     game.task = asyncio.create_task(start_lobby_timer(game, context))
-    log.info("Demo lobby %s opened in %s with four NPCs", game_id, chat.id)
+    log.info("Lobby %s opened in %s", game_id, chat.id)
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat = update.effective_chat
     message = update.effective_message
-    if not chat or not message:
+    user = update.effective_user
+    if not chat or not message or chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP):
+        if message:
+            await message.reply_text("Use /endspy in a game group.")
         return
     game_id = CHAT_GAMES.get(chat.id)
     game = GAMES.get(game_id) if game_id else None
     if not game:
         await message.reply_text("There is no active game in this group.")
         return
+    if not user:
+        return
+    if user.id != BOT_OWNER_ID:
+        try:
+            member = await context.bot.get_chat_member(chat.id, user.id)
+            if member.status not in ("administrator", "creator"):
+                await message.reply_text("Only group admins can end the game.")
+                return
+        except TelegramError:
+            await message.reply_text("I couldn't verify your group-admin permissions.")
+            return
     game.phase = "finished"
     if game.task:
         game.task.cancel()
-    for task in (game.turn_task, game.vote_task, game.guess_task, game.npc_task):
+    for task in (game.turn_task, game.vote_task, game.guess_task):
         if task:
             task.cancel()
-    await message.reply_text("{STOP_EMOJI} The game has been cancelled.")
+    await message.reply_text(f"{STOP_EMOJI} The game has been ended by a group admin.", parse_mode=ParseMode.HTML)
     cleanup_game(game)
 
 def main_menu_markup() -> InlineKeyboardMarkup:
@@ -687,8 +695,6 @@ async def begin_game(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     failed = []
     for player in game.players:
         word = game.spy_word if player.user_id == game.spy_id else game.civilian_word
-        if player.is_npc:
-            continue
         try:
             await context.bot.send_message(
                 player.user_id,
@@ -750,22 +756,6 @@ async def prompt_current_player(game: Game, context: ContextTypes.DEFAULT_TYPE) 
         await open_voting(game, context)
         return
     player = active[game.turn_index]
-    if player.is_npc:
-        if game.turn_index == 0:
-            heading = f"{ROUND_EMOJI} <b>ROUND {game.round_no}</b>\n\n"
-        else:
-            heading = ""
-        clues = [
-            "You might use it every morning.",
-            "It is something many people know well.",
-            "You can find it in different places.",
-            "It is associated with everyday life.",
-            "Some people prefer it over its alternative.",
-        ]
-        await context.bot.send_message(game.chat_id, heading + f"{MIC_EMOJI} <b>{html.escape(player.name)}'s turn</b>\n{html.escape(random.choice(clues))}", parse_mode=ParseMode.HTML)
-        game.turn_index += 1
-        game.turn_task = asyncio.create_task(npc_next_turn(game, context))
-        return
     turn_label = f"@{player.username}" if player.username else player.name
     heading = f"{ROUND_EMOJI} <b>ROUND {game.round_no}</b>\n\n" if game.turn_index == 0 else ""
     await context.bot.send_message(
@@ -779,18 +769,6 @@ async def prompt_current_player(game: Game, context: ContextTypes.DEFAULT_TYPE) 
     game.turn_task = asyncio.create_task(
         explanation_timeout(game, context, game.round_no, game.turn_index)
     )
-
-async def npc_next_turn(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
-    try:
-        await asyncio.sleep(3)
-        async with game.lock:
-            if game.phase == "explaining":
-                await prompt_current_player(game, context)
-    except asyncio.CancelledError:
-        return
-    except Exception:
-        log.exception("NPC turn failed")
-
 
 async def explanation_timeout(
     game: Game,
@@ -899,12 +877,6 @@ async def open_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     game.phase = "voting"
     game.votes = {}
     game.vote_candidates = list(game.active)
-    # Demo NPCs cast their votes automatically so a solo test can reach a result.
-    npc_ids = [p.user_id for p in game.active_players() if p.is_npc]
-    for npc_id in npc_ids:
-        choices = [uid for uid in game.vote_candidates if uid != npc_id]
-        if choices:
-            game.votes[npc_id] = random.choice(choices)
     sent = await context.bot.send_message(
         game.chat_id,
         voting_text(game),
@@ -981,10 +953,6 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
         game.vote_is_tiebreaker = True
         game.vote_candidates = tied
         game.votes = {}
-        for npc in [p for p in game.active_players() if p.is_npc]:
-            choices = [uid for uid in tied if uid != npc.user_id]
-            if choices:
-                game.votes[npc.user_id] = random.choice(choices)
         try:
             await context.bot.edit_message_text(
                 voting_text(game),
@@ -1022,8 +990,6 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     def linked_name(player: Player, limit: int = 14) -> str:
         label = player.name if len(player.name) <= limit else player.name[:limit - 1].rstrip() + "…"
         escaped = html.escape(label)
-        if player.is_npc:
-            return escaped
         if single_person and player.username:
             return "@" + html.escape(player.username)
         href = (
@@ -1077,12 +1043,6 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def ask_spy_guess(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     game.phase = "spy_guess"
     spy_player = game.player(game.spy_id) if game.spy_id else None
-    if spy_player and spy_player.is_npc:
-        correct = random.random() < 0.35
-        await context.bot.send_message(game.chat_id, f"{OBJECTIVE_EMOJI} <b>{html.escape(spy_player.name)}</b> is making a final guess...", parse_mode=ParseMode.HTML)
-        await asyncio.sleep(3)
-        await end_game(game, context, spy_wins=correct, reason=("The demo Spy guessed the civilians' word correctly!" if correct else "The demo Spy guessed the wrong word."))
-        return
     options = [game.civilian_word]
     # Use only words from the simple everyday bank for the Spy's final choices.
     with sqlite3.connect(DATABASE_PATH) as db:
@@ -1165,7 +1125,7 @@ async def guess_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def end_game(game: Game, context: ContextTypes.DEFAULT_TYPE, spy_wins: bool, reason: str) -> None:
     game.phase = "finished"
-    for task_name in ("turn_task", "vote_task", "guess_task", "npc_task"):
+    for task_name in ("turn_task", "vote_task", "guess_task"):
         task = getattr(game, task_name)
         if task and task is not asyncio.current_task():
             task.cancel()
@@ -1206,7 +1166,7 @@ def main() -> None:
     app.add_handler(CommandHandler("rules", rules_command))
     app.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu:"))
     app.add_handler(CommandHandler("spy", spy_command))
-    app.add_handler(CommandHandler("cancelspy", cancel_command))
+    app.add_handler(CommandHandler(["endspy", "cancelspy"], cancel_command))
     app.add_handler(CallbackQueryHandler(verify_channel_callback, pattern=r"^verify_channel$"))
     app.add_handler(CallbackQueryHandler(vote_callback, pattern=r"^vote:"))
     app.add_handler(CallbackQueryHandler(guess_callback, pattern=r"^guess:"))
