@@ -252,9 +252,11 @@ def load_emoji_settings() -> None:
         rows = dict(db.execute("SELECT key, value FROM bot_settings WHERE key LIKE 'emoji_%'"))
     for key in SETID_ORDER:
         emoji_id = rows.get(f"emoji_{key}", EMOJI_IDS.get(key, "0"))
-        globals()[f"{key.upper()}_EMOJI"] = f'<tg-emoji emoji-id="{html.escape(emoji_id)}">{EMOJI_FALLBACKS[key]}</tg-emoji>'
         if emoji_id != "0":
+            globals()[f"{key.upper()}_EMOJI"] = f'<tg-emoji emoji-id="{html.escape(emoji_id)}">{EMOJI_FALLBACKS[key]}</tg-emoji>'
             EMOJI_IDS[key] = emoji_id
+        else:
+            globals()[f"{key.upper()}_EMOJI"] = EMOJI_FALLBACKS[key]
 
 
 def save_emoji_id(key: str, emoji_id: str) -> None:
@@ -1169,7 +1171,7 @@ async def end_game(game: Game, context: ContextTypes.DEFAULT_TYPE, spy_wins: boo
             task.cancel()
         setattr(game, task_name, None)
     spy = game.player(game.spy_id) if game.spy_id else None
-    winner = f"{SPY_EMOJI} <b>THE SPY WINS!</b>" if spy_wins else "{JOIN_EMOJI} <b>THE CIVILIANS WIN!</b>"
+    winner = f"{SPY_EMOJI} <b>THE SPY WINS!</b>" if spy_wins else f"{JOIN_EMOJI} <b>THE CIVILIANS WIN!</b>"
     await context.bot.send_message(
         game.chat_id,
         f"{winner}\n\n{html.escape(reason)}\n\n"
