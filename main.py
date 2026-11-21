@@ -346,10 +346,10 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     cleanup_game(game)
 
 def main_menu_markup() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📜 Game Rules", callback_data="menu:rules", style="primary")],
-        [InlineKeyboardButton("📢 Updates Channel", url=f"https://t.me/{REQUIRED_CHANNEL.lstrip('@')}", style="success")],
-    ])
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("📜 Rules", callback_data="menu:rules", style="primary"),
+        InlineKeyboardButton("💬 Discussion", url="https://t.me/+WJYnfYWc_GU0Y2U1", style="success"),
+    ]])
 
 
 def rules_text() -> str:
@@ -400,13 +400,20 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     elif query.data == "menu:home":
         await query.answer()
         await query.edit_message_text(
-            "🕵️ <b>WHO'S THE SPY?</b>\n\n"
-            "A social deduction game of secret words, explanations and votes.\n\n"
-            "Use /spy in a group to open a lobby. At least 5 players are needed.\n"
-            "Tap below to learn the rules.",
+            "╭━━━ 🕵️ ━━━╮\n"
+            "<b>WHO'S THE SPY?</b>\n"
+            "╰━━━━━━━━━━╯\n\n"
+            "Welcome, detective.\n\n"
+            "Your mission is simple:\n"
+            "Blend in. Read the room. Question everything.\n\n"
+            "Somewhere in the group, someone has a different word.\n"
+            "They'll do everything they can to avoid being exposed.\n\n"
+            "Think you can figure out who's pretending?\n\n"
+            "The investigation starts in your group chat.",
             reply_markup=main_menu_markup(),
             parse_mode=ParseMode.HTML,
             disable_web_page_preview=True,
+        )
         )
 
 
@@ -474,18 +481,20 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     await message.reply_text(
-        "🕵️ <b>WHO'S THE SPY?</b>\n"
-        "<i>One word separates the Spy from everyone else.</i>\n\n"
-        "🎮 <b>Start playing</b>\n"
-        "Open a group where the bot is added and send /spy. "
-        "Players can join using the lobby button.\n\n"
-        "👥 Minimum players: <b>5</b>\n"
-        "⏳ Lobby duration: <b>2 minutes</b>\n"
-        "🔐 Secret words are delivered here in your private chat.\n\n"
-        "Choose <b>Game Rules</b> below before your first round.",
+        "╭━━━ 🕵️ ━━━╮\n"
+        "<b>WHO'S THE SPY?</b>\n"
+        "╰━━━━━━━━━━╯\n\n"
+        "Welcome, detective.\n\n"
+        "Your mission is simple:\n"
+        "Blend in. Read the room. Question everything.\n\n"
+        "Somewhere in the group, someone has a different word.\n"
+        "They'll do everything they can to avoid being exposed.\n\n"
+        "Think you can figure out who's pretending?\n\n"
+        "The investigation starts in your group chat.",
         reply_markup=main_menu_markup(),
         parse_mode=ParseMode.HTML,
         disable_web_page_preview=True,
+    )
     )
 
 async def verify_channel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
