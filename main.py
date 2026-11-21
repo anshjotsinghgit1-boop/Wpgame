@@ -797,7 +797,8 @@ async def vote_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if target_id not in (game.vote_candidates or []):
             await query.answer("That player isn't eligible in this vote.", show_alert=True)
             return
-        if voter_id == target_id:            await query.answer("You can't vote for yourself.", show_alert=True)
+        if voter_id == target_id:
+            await query.answer("You can't vote for yourself.", show_alert=True)
             return
         game.votes[voter_id] = target_id
         await query.answer("Vote recorded!")
