@@ -250,6 +250,14 @@ def save_emoji_id(key: str, emoji_id: str) -> None:
     globals()[f"{key.upper()}_EMOJI"] = f'<tg-emoji emoji-id="{html.escape(emoji_id)}">{EMOJI_FALLBACKS[key]}</tg-emoji>'
 
 
+def custom_emoji_ids(message) -> list[str]:
+    return [
+        entity.custom_emoji_id
+        for entity in (message.entities or [])
+        if entity.type == "custom_emoji" and getattr(entity, "custom_emoji_id", None)
+    ]
+
+
 async def setid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message, user = update.effective_message, update.effective_user
     if not message or not user or message.chat.type != ChatType.PRIVATE:
@@ -257,16 +265,18 @@ async def setid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await message.reply_text("Use /setid in the bot's private chat.")
         return
     if not BOT_OWNER_ID or user.id != BOT_OWNER_ID:
-        await message.reply_text("Owner only. Add BOT_OWNER_ID=your_telegram_numeric_id to the service environment.")
+        await message.reply_text("Owner only. Configure BOT_OWNER_ID in the service environment.")
         return
     context.user_data["setid_index"] = 0
-    await message.reply_text("Send the custom emoji ID for SPEAKER. Send only the numeric ID. I'll ask for each remaining emoji one by one. Use /cancelsetid to stop.")
+    context.user_data["setid_pending"] = {}
+    await message.reply_text("Send the SPEAKER custom emoji itself (not its ID). I'll read its ID automatically, then ask for the next emoji. Nothing is changed until all seven are received. Use /cancelsetid to stop.")
 
 
 async def cancel_setid_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop("setid_index", None)
+    context.user_data.pop("setid_pending", None)
     if update.effective_message:
-        await update.effective_message.reply_text("Emoji ID setup cancelled.")
+        await update.effective_message.reply_text("Emoji setup cancelled. Your previously saved emoji IDs are unchanged.")
 
 
 async def replace_emoji_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -276,20 +286,26 @@ async def replace_emoji_command(update: Update, context: ContextTypes.DEFAULT_TY
             await message.reply_text("Use /replace in the bot's private chat.")
         return
     if not BOT_OWNER_ID or user.id != BOT_OWNER_ID:
-        await message.reply_text("Owner only. Add BOT_OWNER_ID=your_telegram_numeric_id to the service environment.")
+        await message.reply_text("Owner only. Configure BOT_OWNER_ID in the service environment.")
         return
-    match = re.fullmatch(r"(\d+)\s+to\s+(\d+)", " ".join(context.args), re.I)
-    if not match:
-        await message.reply_text("Format: /replace OLD_ID to NEW_ID")
-        return
-    old_id, new_id = match.groups()
+
+    ids = custom_emoji_ids(message)
+    if len(ids) >= 2:
+        old_id, new_id = ids[0], ids[1]
+    else:
+        match = re.fullmatch(r"(\d+)\s+to\s+(\d+)", " ".join(context.args), re.I)
+        if not match:
+            await message.reply_text("Send: /replace OLD_CUSTOM_EMOJI to NEW_CUSTOM_EMOJI (or use numeric IDs).")
+            return
+        old_id, new_id = match.groups()
+
     keys = [key for key, value in EMOJI_IDS.items() if value == old_id]
     if not keys:
-        await message.reply_text("That ID is not currently assigned.")
+        await message.reply_text("The old emoji isn't currently assigned.")
         return
     for key in keys:
         save_emoji_id(key, new_id)
-    await message.reply_text("Updated: " + ", ".join(keys))
+    await message.reply_text("Updated permanently: " + ", ".join(key.upper() for key in keys))
 
 
 async def emoji_id_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -299,19 +315,25 @@ async def emoji_id_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     index = context.user_data.get("setid_index")
     if index is None:
         return
-    emoji_id = (message.text or "").strip()
-    if not emoji_id.isdigit():
-        await message.reply_text("Please send only the numeric custom emoji ID.")
+    ids = custom_emoji_ids(message)
+    if len(ids) != 1:
+        await message.reply_text("Please send exactly one Telegram Premium custom emoji by itself.")
         return
+
     key = SETID_ORDER[index]
-    save_emoji_id(key, emoji_id)
+    pending = context.user_data.setdefault("setid_pending", {})
+    pending[key] = ids[0]
     index += 1
     if index == len(SETID_ORDER):
+        for emoji_key, emoji_id in pending.items():
+            save_emoji_id(emoji_key, emoji_id)
         context.user_data.pop("setid_index", None)
-        await message.reply_text("All remaining custom emoji IDs are saved permanently.")
+        context.user_data.pop("setid_pending", None)
+        await message.reply_text("All seven custom emoji IDs have been saved permanently in the database. They will survive bot restarts.")
         return
+
     context.user_data["setid_index"] = index
-    await message.reply_text(f"Saved {key.upper()}. Now send the ID for {SETID_ORDER[index].upper()}.")
+    await message.reply_text(f"Received {key.upper()}. Now send the {SETID_ORDER[index].upper()} custom emoji itself.")
 
 
 def remember_user(user: User) -> None:
