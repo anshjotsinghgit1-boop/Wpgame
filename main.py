@@ -383,8 +383,8 @@ def lobby_text(game: Game, seconds_left: int = LOBBY_SECONDS) -> str:
     return (
         f"{SPY_EMOJI} <b>WHO'S THE SPY?</b>\n\n"
         "A new game lobby is open!\n"
-        f"👥 <b>Players:</b> {len(game.players)}/{MIN_PLAYERS}+\n"
-        f"⏳ <b>Time:</b> {seconds_left // 60}:{seconds_left % 60:02d}\n\n"
+        f"{PEOPLE_EMOJI} <b>Players:</b> {len(game.players)}/{MIN_PLAYERS}+\n"
+        f"{TIMER_EMOJI} <b>Time:</b> {seconds_left // 60}:{seconds_left % 60:02d}\n\n"
         f"{names}\n\n"
         "Tap <b>Join Game</b> and open the bot in private chat to enter."
     )
