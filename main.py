@@ -867,16 +867,24 @@ async def finish_voting(game: Game, context: ContextTypes.DEFAULT_TYPE) -> None:
     eliminated = game.player(eliminated_id)
     players = {p.user_id: p for p in game.players}
 
+    # Decide mention style from the number of distinct people named anywhere
+    # in this complete breakdown, including voters, targets, tally, and elimination.
+    mentioned_ids = set(game.votes.keys()) | set(game.votes.values()) | set(counts.keys())
+    if eliminated_id is not None:
+        mentioned_ids.add(eliminated_id)
+    single_person = len(mentioned_ids) == 1
+
     def linked_name(player: Player, limit: int = 14) -> str:
-        # Demo players have no Telegram account; real players get clickable mentions.
         label = player.name if len(player.name) <= limit else player.name[:limit - 1].rstrip() + "…"
         escaped = html.escape(label)
         if player.is_npc:
             return escaped
-        if player.username:
-            href = f"https://t.me/{html.escape(player.username)}"
-        else:
-            href = f"tg://user?id={player.user_id}"
+        if single_person and player.username:
+            return "@" + html.escape(player.username)
+        href = (
+            f"https://t.me/{html.escape(player.username)}"
+            if player.username else f"tg://user?id={player.user_id}"
+        )
         return f'<a href="{href}">{escaped}</a>'
 
     def aligned_name(player: Player, width: int = 15) -> str:
