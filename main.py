@@ -350,10 +350,14 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     cleanup_game(game)
 
 def main_menu_markup() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("📜 Rules", callback_data="menu:rules", style="primary"),
-        InlineKeyboardButton("💬 Discussion", url="https://t.me/+WJYnfYWc_GU0Y2U1", style="success"),
-    ]])
+    add_to_group_url = f"https://t.me/{BOT_USERNAME}?startgroup=true"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Add Bot to Your Group", url=add_to_group_url, style="success")],
+        [
+            InlineKeyboardButton("📜 Rules", callback_data="menu:rules", style="primary"),
+            InlineKeyboardButton("💬 Discussion", url="https://t.me/+WJYnfYWc_GU0Y2U1", style="success"),
+        ],
+    ])
 
 
 def rules_text() -> str:
