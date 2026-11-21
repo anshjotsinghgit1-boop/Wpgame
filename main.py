@@ -1175,7 +1175,7 @@ async def end_game(game: Game, context: ContextTypes.DEFAULT_TYPE, spy_wins: boo
     await context.bot.send_message(
         game.chat_id,
         f"{winner}\n\n{html.escape(reason)}\n\n"
-        f"{SPY_EMOJI} Spy: {spy.mention if spy else 'Unknown'}\n"
+        f"{SPY_EMOJI} Spy: {'@' + html.escape(spy.username) if spy and spy.username else html.escape(spy.name) if spy else 'Unknown'}\n"
         f"{PEOPLE_EMOJI} Civilians' word: <b>{html.escape(game.civilian_word or '')}</b>\n"
         f"{SPY_EMOJI} Spy's word: <b>{html.escape(game.spy_word or '')}</b>",
         parse_mode=ParseMode.HTML,
