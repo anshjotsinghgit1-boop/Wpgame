@@ -103,7 +103,12 @@ def build_word_pair_bank() -> int:
                 left, right = sorted((words[i], words[j]), key=str.casefold)
                 pairs.add((left, right))
     with sqlite3.connect(DATABASE_PATH) as db:
-        # Recreate without the old per-column UNIQUE limits from the WordNet bank.
+        db.execute("CREATE TABLE IF NOT EXISTS word_bank_meta (version INTEGER NOT NULL)")
+        row = db.execute("SELECT version FROM word_bank_meta LIMIT 1").fetchone()
+        if row and row[0] == 1:
+            return db.execute("SELECT COUNT(*) FROM word_pair_bank").fetchone()[0]
+
+        # Replace the old WordNet table once, removing its per-column UNIQUE limits.
         db.execute("DROP TABLE IF EXISTS word_pair_bank")
         db.execute("""CREATE TABLE word_pair_bank (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -115,6 +120,8 @@ def build_word_pair_bank() -> int:
             "INSERT INTO word_pair_bank(word_a, word_b, used) VALUES(?, ?, 0)",
             sorted(pairs, key=lambda pair: (pair[0].casefold(), pair[1].casefold())),
         )
+        db.execute("DELETE FROM word_bank_meta")
+        db.execute("INSERT INTO word_bank_meta(version) VALUES(1)")
         count = db.execute("SELECT COUNT(*) FROM word_pair_bank").fetchone()[0]
     return count
 
